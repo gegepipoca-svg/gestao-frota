@@ -1,0 +1,1516 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestão de Frota & Consórcios</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        .sidebar-item.active { background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: white; }
+        .header-gradient { background: linear-gradient(135deg, #1e40af 0%, #1e3a8a 100%); }
+        .loader { border: 4px solid #f3f3f3; border-top: 4px solid #2563eb; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .fade-in { animation: fadeIn 0.3s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div id="app">
+        <div class="min-h-screen flex items-center justify-center">
+            <div class="loader"></div>
+        </div>
+    </div>
+
+    <script>
+        // =====================================================
+        // CONFIGURAÇÃO SUPABASE - SUAS CREDENCIAIS
+        // =====================================================
+        const SUPABASE_URL = 'https://fipsbtdabuxwmrkmlzgn.supabase.co';
+        const SUPABASE_KEY = 'sb_publishable_i3o5m2kdFhBUaTj-34ev8A_ZvAZeefd';
+        
+        const db = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        // =====================================================
+        // ESTADO DA APLICAÇÃO
+        // =====================================================
+        let state = {
+            user: null,
+            usuario: null,
+            empresa: null,
+            abaAtiva: 'visaoGeral',
+            periodo: 'mes',
+            menuAberto: false,
+            modal: { tipo: null, dados: null },
+            confirmacao: null,
+            loading: true,
+            dados: {
+                consorcios: [],
+                veiculos: [],
+                motoristas: [],
+                contratos: [],
+                fornecedores: [],
+                manutencoes: [],
+                transacoes: [],
+                usuarios: []
+            }
+        };
+
+        // =====================================================
+        // FUNÇÕES AUXILIARES
+        // =====================================================
+        const formatarMoeda = (valor) => (valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+        
+        const formatarData = (data) => {
+            if (!data) return '-';
+            return new Date(data + 'T00:00:00').toLocaleDateString('pt-BR');
+        };
+
+        const getPeriodo = (tipo) => {
+            const hoje = new Date();
+            let inicio, fim;
+            switch (tipo) {
+                case 'hoje':
+                    inicio = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+                    fim = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), 23, 59, 59);
+                    break;
+                case 'semana':
+                    const primeiroDiaSemana = hoje.getDate() - hoje.getDay();
+                    inicio = new Date(hoje.getFullYear(), hoje.getMonth(), primeiroDiaSemana);
+                    fim = new Date(hoje.getFullYear(), hoje.getMonth(), primeiroDiaSemana + 6, 23, 59, 59);
+                    break;
+                case 'mes':
+                    inicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+                    fim = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0, 23, 59, 59);
+                    break;
+                case 'trimestre':
+                    const trim = Math.floor(hoje.getMonth() / 3);
+                    inicio = new Date(hoje.getFullYear(), trim * 3, 1);
+                    fim = new Date(hoje.getFullYear(), trim * 3 + 3, 0, 23, 59, 59);
+                    break;
+                case 'semestre':
+                    const sem = Math.floor(hoje.getMonth() / 6);
+                    inicio = new Date(hoje.getFullYear(), sem * 6, 1);
+                    fim = new Date(hoje.getFullYear(), sem * 6 + 6, 0, 23, 59, 59);
+                    break;
+                case 'ano':
+                    inicio = new Date(hoje.getFullYear(), 0, 1);
+                    fim = new Date(hoje.getFullYear(), 11, 31, 23, 59, 59);
+                    break;
+                default:
+                    inicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+                    fim = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0, 23, 59, 59);
+            }
+            return { inicio: inicio.toISOString().split('T')[0], fim: fim.toISOString().split('T')[0] };
+        };
+
+        // =====================================================
+        // FUNÇÕES DO SUPABASE
+        // =====================================================
+        
+        const carregarDadosUsuario = async (authId) => {
+            try {
+                const { data, error } = await supabase
+                    .from('usuarios')
+                    .select('*, empresas(*)')
+                    .eq('auth_id', authId)
+                    .single();
+                
+                if (data) {
+                    state.usuario = data;
+                    state.empresa = data.empresas;
+                    return true;
+                }
+                return false;
+            } catch (e) {
+                console.error('Erro ao carregar usuário:', e);
+                return false;
+            }
+        };
+
+        const carregarTodosDados = async () => {
+            if (!state.empresa?.id) return;
+            
+            const empresaId = state.empresa.id;
+            
+            try {
+                const [consorcios, veiculos, motoristas, contratos, fornecedores, manutencoes, transacoes, usuarios] = await Promise.all([
+                    supabase.from('consorcios').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
+                    supabase.from('veiculos').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
+                    supabase.from('motoristas').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
+                    supabase.from('contratos').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
+                    supabase.from('fornecedores').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
+                    supabase.from('manutencoes').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
+                    supabase.from('transacoes').select('*').eq('empresa_id', empresaId).order('data', { ascending: false }),
+                    supabase.from('usuarios').select('*').eq('empresa_id', empresaId)
+                ]);
+
+                state.dados = {
+                    consorcios: consorcios.data || [],
+                    veiculos: veiculos.data || [],
+                    motoristas: motoristas.data || [],
+                    contratos: contratos.data || [],
+                    fornecedores: fornecedores.data || [],
+                    manutencoes: manutencoes.data || [],
+                    transacoes: transacoes.data || [],
+                    usuarios: usuarios.data || []
+                };
+            } catch (e) {
+                console.error('Erro ao carregar dados:', e);
+            }
+        };
+
+        const salvarItem = async (tabela, dados, id = null) => {
+            try {
+                if (id) {
+                    const { data, error } = await db.from(tabela).update(dados).eq('id', id).select().single();
+                    if (error) throw error;
+                    return data;
+                } else {
+                    const { data, error } = await db.from(tabela).insert({ ...dados, empresa_id: state.empresa.id }).select().single();
+                    if (error) throw error;
+                    return data;
+                }
+            } catch (e) {
+                console.error('Erro ao salvar:', e);
+                alert('Erro ao salvar: ' + e.message);
+                return null;
+            }
+        };
+
+        const excluirItem = async (tabela, id) => {
+            try {
+                const { error } = await db.from(tabela).delete().eq('id', id);
+                if (error) throw error;
+                return true;
+            } catch (e) {
+                console.error('Erro ao excluir:', e);
+                alert('Erro ao excluir: ' + e.message);
+                return false;
+            }
+        };
+
+        // =====================================================
+        // AUTENTICAÇÃO
+        // =====================================================
+        
+        const fazerLogin = async (email, senha) => {
+            try {
+                const { data, error } = await db.auth.signInWithPassword({ email, password: senha });
+                if (error) throw error;
+                return data;
+            } catch (e) {
+                throw e;
+            }
+        };
+
+        const fazerCadastro = async (email, senha, nome, nomeEmpresa) => {
+            try {
+                // 1. Criar usuário no Auth
+                const { data: authData, error: authError } = await db.auth.signUp({ email, password: senha });
+                if (authError) throw authError;
+
+                // 2. Criar empresa
+                const { data: empresaData, error: empresaError } = await supabase
+                    .from('empresas')
+                    .insert({ nome: nomeEmpresa })
+                    .select()
+                    .single();
+                if (empresaError) throw empresaError;
+
+                // 3. Criar configurações
+                await db.from('configuracoes').insert({
+                    empresa_id: empresaData.id,
+                    locacao_semanal: 650,
+                    locacao_mensal: 2400
+                });
+
+                // 4. Criar usuário
+                const { error: usuarioError } = await db.from('usuarios').insert({
+                    auth_id: authData.user.id,
+                    empresa_id: empresaData.id,
+                    nome,
+                    email,
+                    role: 'admin',
+                    participacao: 33.33
+                });
+                if (usuarioError) throw usuarioError;
+
+                return authData;
+            } catch (e) {
+                throw e;
+            }
+        };
+
+        const fazerLogout = async () => {
+            await db.auth.signOut();
+            state.user = null;
+            state.usuario = null;
+            state.empresa = null;
+            render();
+        };
+
+        // =====================================================
+        // TELA DE LOGIN
+        // =====================================================
+        const renderLogin = () => {
+            return `
+                <div class="min-h-screen bg-gradient-to-br from-blue-600 to-blue-900 flex items-center justify-center p-4">
+                    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden fade-in">
+                        <div class="header-gradient p-8 text-center">
+                            <div class="w-20 h-20 bg-white/20 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                                <i data-lucide="car" class="w-12 h-12 text-white"></i>
+                            </div>
+                            <h1 class="text-2xl font-bold text-white">Gestão de Frota</h1>
+                            <p class="text-blue-200 text-sm mt-1">Consórcios & Locação</p>
+                        </div>
+
+                        <div class="flex border-b">
+                            <button onclick="mostrarAbaLogin('entrar')" id="tabEntrar" class="flex-1 py-3 font-medium text-blue-600 border-b-2 border-blue-600">Entrar</button>
+                            <button onclick="mostrarAbaLogin('cadastrar')" id="tabCadastrar" class="flex-1 py-3 font-medium text-gray-500">Criar Conta</button>
+                        </div>
+
+                        <div id="formEntrar" class="p-6 space-y-4">
+                            <div id="loginError" class="hidden p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm"></div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                                <input type="email" id="loginEmail" required
+                                    class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    placeholder="seu@email.com">
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Senha</label>
+                                <input type="password" id="loginSenha" required
+                                    class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                    placeholder="••••••••">
+                            </div>
+
+                            <button onclick="handleLogin()" id="btnLogin"
+                                class="w-full py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition flex items-center justify-center gap-2">
+                                <i data-lucide="log-in" class="w-5 h-5"></i>
+                                Entrar
+                            </button>
+                        </div>
+
+                        <div id="formCadastrar" class="p-6 space-y-4 hidden">
+                            <div id="cadastroError" class="hidden p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm"></div>
+                            <div id="cadastroSucesso" class="hidden p-3 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm"></div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Seu Nome</label>
+                                <input type="text" id="cadastroNome" required
+                                    class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                    placeholder="João Silva">
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Nome da Empresa</label>
+                                <input type="text" id="cadastroEmpresa" required
+                                    class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                    placeholder="Minha Locadora">
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                                <input type="email" id="cadastroEmail" required
+                                    class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                    placeholder="seu@email.com">
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Senha (mín. 6 caracteres)</label>
+                                <input type="password" id="cadastroSenha" required minlength="6"
+                                    class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                                    placeholder="••••••••">
+                            </div>
+
+                            <button onclick="handleCadastro()" id="btnCadastro"
+                                class="w-full py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition">
+                                Criar Conta
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        };
+
+        const mostrarAbaLogin = (aba) => {
+            const formEntrar = document.getElementById('formEntrar');
+            const formCadastrar = document.getElementById('formCadastrar');
+            const tabEntrar = document.getElementById('tabEntrar');
+            const tabCadastrar = document.getElementById('tabCadastrar');
+
+            if (aba === 'entrar') {
+                formEntrar.classList.remove('hidden');
+                formCadastrar.classList.add('hidden');
+                tabEntrar.classList.add('text-blue-600', 'border-b-2', 'border-blue-600');
+                tabEntrar.classList.remove('text-gray-500');
+                tabCadastrar.classList.remove('text-blue-600', 'border-b-2', 'border-blue-600');
+                tabCadastrar.classList.add('text-gray-500');
+            } else {
+                formEntrar.classList.add('hidden');
+                formCadastrar.classList.remove('hidden');
+                tabCadastrar.classList.add('text-blue-600', 'border-b-2', 'border-blue-600');
+                tabCadastrar.classList.remove('text-gray-500');
+                tabEntrar.classList.remove('text-blue-600', 'border-b-2', 'border-blue-600');
+                tabEntrar.classList.add('text-gray-500');
+            }
+        };
+
+        const handleLogin = async () => {
+            const email = document.getElementById('loginEmail').value;
+            const senha = document.getElementById('loginSenha').value;
+            const btn = document.getElementById('btnLogin');
+            const erro = document.getElementById('loginError');
+
+            btn.disabled = true;
+            btn.innerHTML = '<div class="loader w-5 h-5 border-2"></div> Entrando...';
+            erro.classList.add('hidden');
+
+            try {
+                await fazerLogin(email, senha);
+            } catch (e) {
+                erro.textContent = 'Email ou senha incorretos!';
+                erro.classList.remove('hidden');
+                btn.disabled = false;
+                btn.innerHTML = '<i data-lucide="log-in" class="w-5 h-5"></i> Entrar';
+                lucide.createIcons();
+            }
+        };
+
+        const handleCadastro = async () => {
+            const nome = document.getElementById('cadastroNome').value;
+            const empresa = document.getElementById('cadastroEmpresa').value;
+            const email = document.getElementById('cadastroEmail').value;
+            const senha = document.getElementById('cadastroSenha').value;
+            const btn = document.getElementById('btnCadastro');
+            const erro = document.getElementById('cadastroError');
+            const sucesso = document.getElementById('cadastroSucesso');
+
+            btn.disabled = true;
+            btn.textContent = 'Criando...';
+            erro.classList.add('hidden');
+            sucesso.classList.add('hidden');
+
+            try {
+                await fazerCadastro(email, senha, nome, empresa);
+                sucesso.textContent = 'Conta criada com sucesso! Fazendo login...';
+                sucesso.classList.remove('hidden');
+                setTimeout(() => {
+                    mostrarAbaLogin('entrar');
+                    document.getElementById('loginEmail').value = email;
+                    document.getElementById('loginSenha').value = senha;
+                }, 1500);
+            } catch (e) {
+                erro.textContent = e.message || 'Erro ao criar conta';
+                erro.classList.remove('hidden');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Criar Conta';
+            }
+        };
+
+        // =====================================================
+        // COMPONENTES
+        // =====================================================
+        const CardResumo = (titulo, valor, icone, cor, subtitulo = '') => `
+            <div class="bg-white rounded-xl shadow-lg p-5 border-l-4 ${cor}">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-500 text-sm font-medium">${titulo}</p>
+                        <p class="text-xl font-bold text-gray-800 mt-1">${valor}</p>
+                        ${subtitulo ? `<p class="text-xs text-gray-400 mt-1">${subtitulo}</p>` : ''}
+                    </div>
+                    <div class="p-3 rounded-full ${cor.replace('border-', 'bg-').replace('-600', '-100')}">
+                        <i data-lucide="${icone}" class="w-5 h-5 ${cor.replace('border-', 'text-')}"></i>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        const FiltroPeriodo = () => `
+            <div class="flex flex-wrap gap-2">
+                ${['hoje', 'semana', 'mes', 'trimestre', 'semestre', 'ano'].map(p => `
+                    <button onclick="mudarPeriodo('${p}')"
+                        class="px-3 py-1.5 rounded-lg text-sm font-medium transition ${
+                            state.periodo === p ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }">
+                        ${p.charAt(0).toUpperCase() + p.slice(1)}
+                    </button>
+                `).join('')}
+            </div>
+        `;
+
+        const mudarPeriodo = (p) => {
+            state.periodo = p;
+            render();
+        };
+
+        const mudarAba = (aba) => {
+            state.abaAtiva = aba;
+            state.menuAberto = false;
+            render();
+        };
+
+        const toggleMenu = () => {
+            state.menuAberto = !state.menuAberto;
+            render();
+        };
+
+        // =====================================================
+        // VISÃO GERAL
+        // =====================================================
+        const renderVisaoGeral = () => {
+            const { inicio, fim } = getPeriodo(state.periodo);
+            const transacoesFiltradas = state.dados.transacoes.filter(t => t.data >= inicio && t.data <= fim);
+            
+            const transacoesConsorcio = transacoesFiltradas.filter(t => ['consorcio', 'aporte', 'lance', 'contemplacao'].includes(t.categoria));
+            const transacoesFrota = transacoesFiltradas.filter(t => ['locacao', 'manutencao', 'seguro', 'ipva', 'documentacao', 'combustivel', 'multa', 'outros_frota'].includes(t.categoria));
+            
+            const totalReceitasFrota = transacoesFrota.filter(t => t.tipo === 'receita').reduce((acc, t) => acc + parseFloat(t.valor || 0), 0);
+            const totalDespesasFrota = transacoesFrota.filter(t => t.tipo === 'despesa').reduce((acc, t) => acc + parseFloat(t.valor || 0), 0);
+            const totalDespesasConsorcio = transacoesConsorcio.filter(t => t.tipo === 'despesa').reduce((acc, t) => acc + parseFloat(t.valor || 0), 0);
+            
+            const consorciosContemplados = state.dados.consorcios.filter(c => c.status === 'contemplado').length;
+            const carrosLocados = state.dados.veiculos.filter(v => v.status === 'locado').length;
+            const resultadoGeral = totalReceitasFrota - totalDespesasFrota - totalDespesasConsorcio;
+
+            const socios = state.dados.usuarios.filter(u => u.role === 'admin' || u.role === 'socio');
+
+            return `
+                <div class="space-y-6 fade-in">
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                        <h2 class="text-xl font-bold text-gray-800">Visão Geral</h2>
+                        ${FiltroPeriodo()}
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        ${CardResumo('Consórcios Ativos', state.dados.consorcios.length, 'credit-card', 'border-blue-600', `${consorciosContemplados} contemplado(s)`)}
+                        ${CardResumo('Frota', `${state.dados.veiculos.length} veículo(s)`, 'car', 'border-purple-600', `${carrosLocados} locado(s)`)}
+                        ${CardResumo('Receita Frota (período)', formatarMoeda(totalReceitasFrota), 'trending-up', 'border-green-600')}
+                        ${CardResumo('Resultado Frota', formatarMoeda(totalReceitasFrota - totalDespesasFrota), 'dollar-sign', 'border-emerald-600')}
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div class="bg-white rounded-xl shadow-lg p-6">
+                            <h3 class="font-semibold text-gray-800 mb-4">📊 Fluxo do Período</h3>
+                            <div class="space-y-3">
+                                <div class="flex justify-between items-center p-3 bg-green-50 rounded-lg">
+                                    <span class="text-green-700">Receitas Frota</span>
+                                    <span class="font-bold text-green-700">${formatarMoeda(totalReceitasFrota)}</span>
+                                </div>
+                                <div class="flex justify-between items-center p-3 bg-red-50 rounded-lg">
+                                    <span class="text-red-700">Despesas Frota</span>
+                                    <span class="font-bold text-red-700">- ${formatarMoeda(totalDespesasFrota)}</span>
+                                </div>
+                                <div class="flex justify-between items-center p-3 bg-blue-50 rounded-lg">
+                                    <span class="text-blue-700">Parcelas Consórcio</span>
+                                    <span class="font-bold text-blue-700">- ${formatarMoeda(totalDespesasConsorcio)}</span>
+                                </div>
+                                <div class="border-t pt-3">
+                                    <div class="flex justify-between items-center p-3 bg-gray-100 rounded-lg">
+                                        <span class="font-semibold text-gray-700">Resultado Geral</span>
+                                        <span class="font-bold ${resultadoGeral >= 0 ? 'text-green-700' : 'text-red-700'}">
+                                            ${formatarMoeda(resultadoGeral)}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-white rounded-xl shadow-lg p-6">
+                            <h3 class="font-semibold text-gray-800 mb-4">👥 Resultado por Sócio</h3>
+                            ${socios.length === 0 ? '<p class="text-gray-500">Cadastre os sócios nas configurações</p>' : `
+                                <div class="space-y-3">
+                                    ${socios.map(s => {
+                                        const resultadoSocio = resultadoGeral * (parseFloat(s.participacao || 33.33) / 100);
+                                        return `
+                                            <div class="flex justify-between items-center p-3 bg-gradient-to-r from-blue-50 to-blue-100 rounded-lg border border-blue-200">
+                                                <div>
+                                                    <span class="font-medium text-blue-800">${s.nome}</span>
+                                                    <span class="text-blue-600 text-sm ml-2">(${parseFloat(s.participacao || 33.33).toFixed(2)}%)</span>
+                                                </div>
+                                                <span class="font-bold ${resultadoSocio >= 0 ? 'text-green-600' : 'text-red-600'}">
+                                                    ${formatarMoeda(resultadoSocio)}
+                                                </span>
+                                            </div>
+                                        `;
+                                    }).join('')}
+                                </div>
+                            `}
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-xl shadow-lg p-6">
+                        <h3 class="font-semibold text-gray-800 mb-4">📋 Últimas Movimentações</h3>
+                        ${transacoesFiltradas.length === 0 ? `
+                            <p class="text-gray-500 text-center py-4">Nenhuma movimentação no período</p>
+                        ` : `
+                            <div class="space-y-2">
+                                ${transacoesFiltradas.slice(0, 8).map(t => `
+                                    <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                                        <div class="flex items-center gap-3">
+                                            <div class="w-8 h-8 rounded-full flex items-center justify-center ${t.tipo === 'receita' ? 'bg-green-100' : 'bg-red-100'}">
+                                                <i data-lucide="${t.tipo === 'receita' ? 'trending-up' : 'credit-card'}" class="w-4 h-4 ${t.tipo === 'receita' ? 'text-green-600' : 'text-red-600'}"></i>
+                                            </div>
+                                            <div>
+                                                <p class="font-medium text-gray-800 text-sm">${t.descricao}</p>
+                                                <p class="text-xs text-gray-500">${t.categoria} • ${formatarData(t.data)}</p>
+                                            </div>
+                                        </div>
+                                        <span class="font-bold ${t.tipo === 'receita' ? 'text-green-600' : 'text-red-600'}">
+                                            ${t.tipo === 'receita' ? '+' : '-'} ${formatarMoeda(t.valor)}
+                                        </span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        `}
+                    </div>
+                </div>
+            `;
+        };
+
+        // =====================================================
+        // CONSÓRCIOS
+        // =====================================================
+        const renderConsorcios = () => {
+            const totalCartas = state.dados.consorcios.reduce((acc, c) => acc + parseFloat(c.valor_carta || 0), 0);
+            const totalInvestido = state.dados.consorcios.reduce((acc, c) => acc + ((c.parcela_atual || 0) * parseFloat(c.valor_parcela || 0)), 0);
+            const totalParcelas = state.dados.consorcios.reduce((acc, c) => acc + parseFloat(c.valor_parcela || 0), 0);
+            const contemplados = state.dados.consorcios.filter(c => c.status === 'contemplado').length;
+
+            return `
+                <div class="space-y-6 fade-in">
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                        <h2 class="text-xl font-bold text-gray-800">Consórcios</h2>
+                        <button onclick="abrirModal('consorcio')" class="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
+                            <i data-lucide="plus" class="w-4 h-4"></i> Novo Consórcio
+                        </button>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        ${CardResumo('Total de Cartas', formatarMoeda(totalCartas), 'credit-card', 'border-blue-600')}
+                        ${CardResumo('Total Investido', formatarMoeda(totalInvestido), 'dollar-sign', 'border-green-600')}
+                        ${CardResumo('Parcelas/Mês', formatarMoeda(totalParcelas), 'calendar', 'border-red-600')}
+                        ${CardResumo('Contemplados', `${contemplados} de ${state.dados.consorcios.length}`, 'check-circle', 'border-emerald-600')}
+                    </div>
+
+                    ${state.dados.consorcios.length === 0 ? `
+                        <div class="bg-white rounded-xl shadow-lg p-8 text-center">
+                            <i data-lucide="credit-card" class="w-12 h-12 mx-auto mb-3 text-gray-300"></i>
+                            <p class="text-gray-500">Nenhum consórcio cadastrado</p>
+                            <button onclick="abrirModal('consorcio')" class="mt-4 text-blue-600 hover:text-blue-700 font-medium">+ Adicionar primeiro consórcio</button>
+                        </div>
+                    ` : `
+                        <div class="bg-white rounded-xl shadow-lg overflow-hidden">
+                            <div class="overflow-x-auto">
+                                <table class="w-full">
+                                    <thead class="bg-gray-50">
+                                        <tr>
+                                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-600">Administradora</th>
+                                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-600">Valor Carta</th>
+                                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-600">Parcela</th>
+                                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-600">Progresso</th>
+                                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-600">Status</th>
+                                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-600">Ações</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y">
+                                        ${state.dados.consorcios.map(c => {
+                                            const progresso = c.total_parcelas ? ((c.parcela_atual || 0) / c.total_parcelas * 100) : 0;
+                                            return `
+                                                <tr class="hover:bg-gray-50">
+                                                    <td class="px-4 py-3">
+                                                        <div class="font-medium text-gray-800">${c.administradora}</div>
+                                                        <div class="text-xs text-gray-500">${c.tipo === 'comprada' ? 'Carta Comprada' : 'Aguardando'}</div>
+                                                    </td>
+                                                    <td class="px-4 py-3 text-gray-700">${formatarMoeda(c.valor_carta)}</td>
+                                                    <td class="px-4 py-3 text-gray-700">${formatarMoeda(c.valor_parcela)}</td>
+                                                    <td class="px-4 py-3">
+                                                        <div class="flex items-center gap-2">
+                                                            <div class="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+                                                                <div class="h-full bg-blue-500 rounded-full" style="width: ${progresso}%"></div>
+                                                            </div>
+                                                            <span class="text-xs text-gray-500">${c.parcela_atual || 0}/${c.total_parcelas || 0}</span>
+                                                        </div>
+                                                    </td>
+                                                    <td class="px-4 py-3">
+                                                        <span class="px-2 py-1 rounded-full text-xs font-medium ${c.status === 'contemplado' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}">
+                                                            ${c.status === 'contemplado' ? 'Contemplado' : 'Aguardando'}
+                                                        </span>
+                                                    </td>
+                                                    <td class="px-4 py-3">
+                                                        <div class="flex items-center gap-1">
+                                                            <button onclick="abrirModal('consorcio', '${c.id}')" class="p-1.5 hover:bg-gray-200 rounded">
+                                                                <i data-lucide="edit-2" class="w-4 h-4 text-gray-500"></i>
+                                                            </button>
+                                                            <button onclick="confirmarExclusao('consorcios', '${c.id}', '${c.administradora}')" class="p-1.5 hover:bg-red-100 rounded">
+                                                                <i data-lucide="trash-2" class="w-4 h-4 text-red-500"></i>
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            `;
+                                        }).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    `}
+                </div>
+            `;
+        };
+
+        // =====================================================
+        // FROTA
+        // =====================================================
+        const renderFrota = () => {
+            const locados = state.dados.veiculos.filter(v => v.status === 'locado').length;
+            const disponiveis = state.dados.veiculos.filter(v => v.status === 'disponivel').length;
+            const emManutencao = state.dados.veiculos.filter(v => v.status === 'manutencao').length;
+
+            return `
+                <div class="space-y-6 fade-in">
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                        <h2 class="text-xl font-bold text-gray-800">Frota</h2>
+                        <button onclick="abrirModal('veiculo')" class="flex items-center gap-2 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition">
+                            <i data-lucide="plus" class="w-4 h-4"></i> Novo Veículo
+                        </button>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        ${CardResumo('Total de Veículos', state.dados.veiculos.length, 'car', 'border-purple-600')}
+                        ${CardResumo('Locados', locados, 'check-circle', 'border-green-600')}
+                        ${CardResumo('Disponíveis', disponiveis, 'clock', 'border-blue-600')}
+                        ${CardResumo('Em Manutenção', emManutencao, 'wrench', 'border-orange-600')}
+                    </div>
+
+                    ${state.dados.veiculos.length === 0 ? `
+                        <div class="bg-white rounded-xl shadow-lg p-8 text-center">
+                            <i data-lucide="car" class="w-12 h-12 mx-auto mb-3 text-gray-300"></i>
+                            <p class="text-gray-500">Nenhum veículo cadastrado</p>
+                            <button onclick="abrirModal('veiculo')" class="mt-4 text-purple-600 hover:text-purple-700 font-medium">+ Adicionar primeiro veículo</button>
+                        </div>
+                    ` : `
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            ${state.dados.veiculos.map(v => `
+                                <div class="bg-white rounded-xl shadow-lg p-4">
+                                    <div class="flex items-start justify-between mb-3">
+                                        <div class="flex items-center gap-3">
+                                            <div class="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+                                                <i data-lucide="car" class="w-6 h-6 text-purple-600"></i>
+                                            </div>
+                                            <div>
+                                                <h4 class="font-medium text-gray-800">${v.marca || ''} ${v.modelo}</h4>
+                                                <p class="text-sm text-gray-500">${v.placa} • ${v.ano || ''}</p>
+                                            </div>
+                                        </div>
+                                        <span class="px-2 py-1 rounded-full text-xs font-medium ${
+                                            v.status === 'locado' ? 'bg-green-100 text-green-700' :
+                                            v.status === 'manutencao' ? 'bg-orange-100 text-orange-700' :
+                                            'bg-blue-100 text-blue-700'
+                                        }">
+                                            ${v.status === 'locado' ? 'Locado' : v.status === 'manutencao' ? 'Manutenção' : 'Disponível'}
+                                        </span>
+                                    </div>
+                                    <div class="text-sm text-gray-600 mb-3 space-y-1">
+                                        <p><span class="text-gray-400">KM:</span> ${(v.km_atual || 0).toLocaleString()}</p>
+                                        ${v.cor ? `<p><span class="text-gray-400">Cor:</span> ${v.cor}</p>` : ''}
+                                    </div>
+                                    <div class="flex justify-end gap-1 border-t pt-3">
+                                        <button onclick="abrirModal('veiculo', '${v.id}')" class="p-2 hover:bg-gray-100 rounded-lg">
+                                            <i data-lucide="edit-2" class="w-4 h-4 text-gray-500"></i>
+                                        </button>
+                                        <button onclick="confirmarExclusao('veiculos', '${v.id}', '${v.modelo}')" class="p-2 hover:bg-red-100 rounded-lg">
+                                            <i data-lucide="trash-2" class="w-4 h-4 text-red-500"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    `}
+                </div>
+            `;
+        };
+
+        // =====================================================
+        // MOTORISTAS
+        // =====================================================
+        const renderMotoristas = () => {
+            return `
+                <div class="space-y-6 fade-in">
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                        <h2 class="text-xl font-bold text-gray-800">Motoristas</h2>
+                        <button onclick="abrirModal('motorista')" class="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
+                            <i data-lucide="plus" class="w-4 h-4"></i> Novo Motorista
+                        </button>
+                    </div>
+
+                    ${state.dados.motoristas.length === 0 ? `
+                        <div class="bg-white rounded-xl shadow-lg p-8 text-center">
+                            <i data-lucide="user-check" class="w-12 h-12 mx-auto mb-3 text-gray-300"></i>
+                            <p class="text-gray-500">Nenhum motorista cadastrado</p>
+                        </div>
+                    ` : `
+                        <div class="bg-white rounded-xl shadow-lg overflow-hidden">
+                            <div class="overflow-x-auto">
+                                <table class="w-full">
+                                    <thead class="bg-gray-50">
+                                        <tr>
+                                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-600">Nome</th>
+                                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-600">Telefone</th>
+                                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-600">CNH</th>
+                                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-600">Score</th>
+                                            <th class="px-4 py-3 text-left text-sm font-medium text-gray-600">Ações</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y">
+                                        ${state.dados.motoristas.map(m => `
+                                            <tr class="hover:bg-gray-50">
+                                                <td class="px-4 py-3">
+                                                    <div class="font-medium text-gray-800">${m.nome}</div>
+                                                    <div class="text-xs text-gray-500">${m.cpf || '-'}</div>
+                                                </td>
+                                                <td class="px-4 py-3 text-gray-700">${m.telefone || '-'}</td>
+                                                <td class="px-4 py-3">
+                                                    <div class="text-gray-700">${m.cnh || '-'}</div>
+                                                    <div class="text-xs text-gray-500">Val: ${formatarData(m.cnh_validade)}</div>
+                                                </td>
+                                                <td class="px-4 py-3">
+                                                    <span class="text-yellow-500">${'⭐'.repeat(m.score || 5)}</span>
+                                                </td>
+                                                <td class="px-4 py-3">
+                                                    <div class="flex items-center gap-1">
+                                                        <button onclick="abrirModal('motorista', '${m.id}')" class="p-1.5 hover:bg-gray-200 rounded">
+                                                            <i data-lucide="edit-2" class="w-4 h-4 text-gray-500"></i>
+                                                        </button>
+                                                        <button onclick="confirmarExclusao('motoristas', '${m.id}', '${m.nome}')" class="p-1.5 hover:bg-red-100 rounded">
+                                                            <i data-lucide="trash-2" class="w-4 h-4 text-red-500"></i>
+                                                        </button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    `}
+                </div>
+            `;
+        };
+
+        // =====================================================
+        // FINANCEIRO FROTA
+        // =====================================================
+        const renderFinanceiroFrota = () => {
+            const { inicio, fim } = getPeriodo(state.periodo);
+            const transacoesFrota = state.dados.transacoes.filter(t => 
+                ['locacao', 'manutencao', 'seguro', 'ipva', 'documentacao', 'combustivel', 'multa', 'outros_frota'].includes(t.categoria) && t.data >= inicio && t.data <= fim
+            );
+            
+            const totalReceitas = transacoesFrota.filter(t => t.tipo === 'receita').reduce((acc, t) => acc + parseFloat(t.valor || 0), 0);
+            const totalDespesas = transacoesFrota.filter(t => t.tipo === 'despesa').reduce((acc, t) => acc + parseFloat(t.valor || 0), 0);
+            const resultado = totalReceitas - totalDespesas;
+
+            const socios = state.dados.usuarios.filter(u => u.role === 'admin' || u.role === 'socio');
+
+            return `
+                <div class="space-y-6 fade-in">
+                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                        <h2 class="text-xl font-bold text-gray-800">Financeiro - Frota</h2>
+                        <div class="flex flex-wrap items-center gap-4">
+                            ${FiltroPeriodo()}
+                            <button onclick="abrirModal('transacaoFrota')" class="flex items-center gap-2 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition">
+                                <i data-lucide="plus" class="w-4 h-4"></i> Movimentação
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                        ${CardResumo('Receitas (período)', formatarMoeda(totalReceitas), 'trending-up', 'border-green-600')}
+                        ${CardResumo('Despesas (período)', formatarMoeda(totalDespesas), 'credit-card', 'border-red-600')}
+                        ${CardResumo('Resultado', formatarMoeda(resultado), 'dollar-sign', 'border-blue-600')}
+                        ${CardResumo('Movimentações', transacoesFrota.length, 'file-text', 'border-gray-600')}
+                    </div>
+
+                    <div class="bg-white rounded-xl shadow-lg overflow-hidden">
+                        <div class="p-4 bg-gray-50 border-b">
+                            <h3 class="font-semibold text-gray-800">Movimentações do Período</h3>
+                        </div>
+                        ${transacoesFrota.length === 0 ? `
+                            <div class="p-8 text-center text-gray-500">Nenhuma movimentação no período</div>
+                        ` : `
+                            <div class="divide-y max-h-96 overflow-y-auto">
+                                ${transacoesFrota.map(t => `
+                                    <div class="p-4 flex items-center justify-between">
+                                        <div class="flex items-center gap-3">
+                                            <div class="w-10 h-10 rounded-lg flex items-center justify-center ${t.tipo === 'receita' ? 'bg-green-100' : 'bg-red-100'}">
+                                                <i data-lucide="${t.tipo === 'receita' ? 'trending-up' : 'credit-card'}" class="w-5 h-5 ${t.tipo === 'receita' ? 'text-green-600' : 'text-red-600'}"></i>
+                                            </div>
+                                            <div>
+                                                <h4 class="font-medium text-gray-800">${t.descricao}</h4>
+                                                <p class="text-sm text-gray-500">${t.categoria} • ${formatarData(t.data)}</p>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center gap-3">
+                                            <span class="font-bold ${t.tipo === 'receita' ? 'text-green-600' : 'text-red-600'}">
+                                                ${t.tipo === 'receita' ? '+' : '-'} ${formatarMoeda(t.valor)}
+                                            </span>
+                                            <button onclick="confirmarExclusao('transacoes', '${t.id}', 'esta movimentação')" class="p-1.5 hover:bg-red-100 rounded">
+                                                <i data-lucide="trash-2" class="w-4 h-4 text-red-500"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        `}
+                    </div>
+
+                    <div class="bg-white rounded-xl shadow-lg p-6">
+                        <h3 class="font-semibold text-gray-800 mb-4">💰 Resultado por Sócio</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            ${socios.map(s => {
+                                const resultadoSocio = resultado * (parseFloat(s.participacao || 33.33) / 100);
+                                return `
+                                    <div class="p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl border border-purple-200">
+                                        <div class="flex justify-between items-center mb-2">
+                                            <h4 class="font-semibold text-purple-800">${s.nome}</h4>
+                                            <span class="text-sm text-purple-600">${parseFloat(s.participacao || 33.33).toFixed(2)}%</span>
+                                        </div>
+                                        <div class="flex justify-between">
+                                            <span class="text-sm text-purple-600">Resultado</span>
+                                            <span class="font-bold ${resultadoSocio >= 0 ? 'text-green-600' : 'text-red-600'}">${formatarMoeda(resultadoSocio)}</span>
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+        };
+
+        // =====================================================
+        // MODAIS
+        // =====================================================
+        const abrirModal = (tipo, id = null) => {
+            let dados = null;
+            if (id) {
+                const colecaoMap = {
+                    consorcio: 'consorcios',
+                    veiculo: 'veiculos',
+                    motorista: 'motoristas',
+                    contrato: 'contratos',
+                    fornecedor: 'fornecedores',
+                    manutencao: 'manutencoes'
+                };
+                const colecao = colecaoMap[tipo];
+                if (colecao) {
+                    dados = state.dados[colecao].find(item => item.id === id);
+                }
+            }
+            state.modal = { tipo, dados };
+            render();
+        };
+
+        const fecharModal = () => {
+            state.modal = { tipo: null, dados: null };
+            render();
+        };
+
+        const renderModal = () => {
+            if (!state.modal.tipo) return '';
+
+            const modais = {
+                consorcio: renderModalConsorcio,
+                veiculo: renderModalVeiculo,
+                motorista: renderModalMotorista,
+                transacaoFrota: renderModalTransacaoFrota,
+                transacaoConsorcio: renderModalTransacaoConsorcio
+            };
+
+            const fn = modais[state.modal.tipo];
+            return fn ? fn() : '';
+        };
+
+        const renderModalConsorcio = () => {
+            const d = state.modal.dados || {};
+            return `
+                <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden fade-in">
+                        <div class="flex items-center justify-between p-4 border-b bg-gray-50">
+                            <h3 class="text-lg font-semibold text-gray-800">${d.id ? 'Editar' : 'Novo'} Consórcio</h3>
+                            <button onclick="fecharModal()" class="p-2 hover:bg-gray-200 rounded-lg">
+                                <i data-lucide="x" class="w-5 h-5 text-gray-500"></i>
+                            </button>
+                        </div>
+                        <form id="formModal" class="p-4 space-y-4 overflow-y-auto max-h-[60vh]">
+                            <input type="hidden" id="item_id" value="${d.id || ''}">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Administradora</label>
+                                <input type="text" id="administradora" value="${d.administradora || ''}" required class="w-full p-3 border rounded-lg">
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Valor da Carta</label>
+                                    <input type="number" id="valor_carta" value="${d.valor_carta || ''}" required class="w-full p-3 border rounded-lg">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Valor Parcela</label>
+                                    <input type="number" id="valor_parcela" value="${d.valor_parcela || ''}" required class="w-full p-3 border rounded-lg">
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-3 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Parcela Atual</label>
+                                    <input type="number" id="parcela_atual" value="${d.parcela_atual || 0}" class="w-full p-3 border rounded-lg">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Total Parcelas</label>
+                                    <input type="number" id="total_parcelas" value="${d.total_parcelas || ''}" required class="w-full p-3 border rounded-lg">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Dia Venc.</label>
+                                    <input type="number" id="dia_vencimento" value="${d.dia_vencimento || 15}" min="1" max="31" class="w-full p-3 border rounded-lg">
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
+                                    <select id="tipo" class="w-full p-3 border rounded-lg">
+                                        <option value="aguardando" ${d.tipo === 'aguardando' ? 'selected' : ''}>Aguardando</option>
+                                        <option value="comprada" ${d.tipo === 'comprada' ? 'selected' : ''}>Carta Comprada</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                                    <select id="status" class="w-full p-3 border rounded-lg">
+                                        <option value="aguardando" ${d.status === 'aguardando' ? 'selected' : ''}>Aguardando</option>
+                                        <option value="contemplado" ${d.status === 'contemplado' ? 'selected' : ''}>Contemplado</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </form>
+                        <div class="flex justify-end gap-3 p-4 border-t bg-gray-50">
+                            <button onclick="fecharModal()" class="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg">Cancelar</button>
+                            <button onclick="salvarConsorcio()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Salvar</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        };
+
+        const salvarConsorcio = async () => {
+            const id = document.getElementById('item_id').value;
+            const dados = {
+                administradora: document.getElementById('administradora').value,
+                valor_carta: parseFloat(document.getElementById('valor_carta').value) || 0,
+                valor_parcela: parseFloat(document.getElementById('valor_parcela').value) || 0,
+                parcela_atual: parseInt(document.getElementById('parcela_atual').value) || 0,
+                total_parcelas: parseInt(document.getElementById('total_parcelas').value) || 0,
+                dia_vencimento: parseInt(document.getElementById('dia_vencimento').value) || 15,
+                tipo: document.getElementById('tipo').value,
+                status: document.getElementById('status').value
+            };
+
+            const result = await salvarItem('consorcios', dados, id || null);
+            if (result) {
+                await carregarTodosDados();
+                fecharModal();
+            }
+        };
+
+        const renderModalVeiculo = () => {
+            const d = state.modal.dados || {};
+            return `
+                <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden fade-in">
+                        <div class="flex items-center justify-between p-4 border-b bg-gray-50">
+                            <h3 class="text-lg font-semibold text-gray-800">${d.id ? 'Editar' : 'Novo'} Veículo</h3>
+                            <button onclick="fecharModal()" class="p-2 hover:bg-gray-200 rounded-lg"><i data-lucide="x" class="w-5 h-5"></i></button>
+                        </div>
+                        <form class="p-4 space-y-4 overflow-y-auto max-h-[60vh]">
+                            <input type="hidden" id="item_id" value="${d.id || ''}">
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Marca</label>
+                                    <input type="text" id="marca" value="${d.marca || ''}" class="w-full p-3 border rounded-lg">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Modelo</label>
+                                    <input type="text" id="modelo" value="${d.modelo || ''}" required class="w-full p-3 border rounded-lg">
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-3 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Placa</label>
+                                    <input type="text" id="placa" value="${d.placa || ''}" required class="w-full p-3 border rounded-lg">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Ano</label>
+                                    <input type="number" id="ano" value="${d.ano || new Date().getFullYear()}" class="w-full p-3 border rounded-lg">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Cor</label>
+                                    <input type="text" id="cor" value="${d.cor || ''}" class="w-full p-3 border rounded-lg">
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">KM Atual</label>
+                                    <input type="number" id="km_atual" value="${d.km_atual || 0}" class="w-full p-3 border rounded-lg">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+                                    <select id="status" class="w-full p-3 border rounded-lg">
+                                        <option value="disponivel" ${d.status === 'disponivel' ? 'selected' : ''}>Disponível</option>
+                                        <option value="locado" ${d.status === 'locado' ? 'selected' : ''}>Locado</option>
+                                        <option value="manutencao" ${d.status === 'manutencao' ? 'selected' : ''}>Manutenção</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </form>
+                        <div class="flex justify-end gap-3 p-4 border-t bg-gray-50">
+                            <button onclick="fecharModal()" class="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg">Cancelar</button>
+                            <button onclick="salvarVeiculo()" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">Salvar</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        };
+
+        const salvarVeiculo = async () => {
+            const id = document.getElementById('item_id').value;
+            const dados = {
+                marca: document.getElementById('marca').value,
+                modelo: document.getElementById('modelo').value,
+                placa: document.getElementById('placa').value.toUpperCase(),
+                ano: parseInt(document.getElementById('ano').value),
+                cor: document.getElementById('cor').value,
+                km_atual: parseInt(document.getElementById('km_atual').value) || 0,
+                status: document.getElementById('status').value
+            };
+
+            const result = await salvarItem('veiculos', dados, id || null);
+            if (result) {
+                await carregarTodosDados();
+                fecharModal();
+            }
+        };
+
+        const renderModalMotorista = () => {
+            const d = state.modal.dados || {};
+            return `
+                <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg fade-in">
+                        <div class="flex items-center justify-between p-4 border-b bg-gray-50">
+                            <h3 class="text-lg font-semibold text-gray-800">${d.id ? 'Editar' : 'Novo'} Motorista</h3>
+                            <button onclick="fecharModal()" class="p-2 hover:bg-gray-200 rounded-lg"><i data-lucide="x" class="w-5 h-5"></i></button>
+                        </div>
+                        <form class="p-4 space-y-4">
+                            <input type="hidden" id="item_id" value="${d.id || ''}">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Nome</label>
+                                <input type="text" id="nome" value="${d.nome || ''}" required class="w-full p-3 border rounded-lg">
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">CPF</label>
+                                    <input type="text" id="cpf" value="${d.cpf || ''}" class="w-full p-3 border rounded-lg">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Telefone</label>
+                                    <input type="text" id="telefone" value="${d.telefone || ''}" class="w-full p-3 border rounded-lg">
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">CNH</label>
+                                    <input type="text" id="cnh" value="${d.cnh || ''}" class="w-full p-3 border rounded-lg">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Validade CNH</label>
+                                    <input type="date" id="cnh_validade" value="${d.cnh_validade || ''}" class="w-full p-3 border rounded-lg">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Score</label>
+                                <select id="score" class="w-full p-3 border rounded-lg">
+                                    ${[1,2,3,4,5].map(n => `<option value="${n}" ${d.score == n ? 'selected' : ''}>${n} - ${'⭐'.repeat(n)}</option>`).join('')}
+                                </select>
+                            </div>
+                        </form>
+                        <div class="flex justify-end gap-3 p-4 border-t bg-gray-50">
+                            <button onclick="fecharModal()" class="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg">Cancelar</button>
+                            <button onclick="salvarMotorista()" class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">Salvar</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        };
+
+        const salvarMotorista = async () => {
+            const id = document.getElementById('item_id').value;
+            const dados = {
+                nome: document.getElementById('nome').value,
+                cpf: document.getElementById('cpf').value,
+                telefone: document.getElementById('telefone').value,
+                cnh: document.getElementById('cnh').value,
+                cnh_validade: document.getElementById('cnh_validade').value || null,
+                score: parseInt(document.getElementById('score').value)
+            };
+
+            const result = await salvarItem('motoristas', dados, id || null);
+            if (result) {
+                await carregarTodosDados();
+                fecharModal();
+            }
+        };
+
+        const renderModalTransacaoFrota = () => {
+            return `
+                <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg fade-in">
+                        <div class="flex items-center justify-between p-4 border-b bg-gray-50">
+                            <h3 class="text-lg font-semibold text-gray-800">Nova Movimentação - Frota</h3>
+                            <button onclick="fecharModal()" class="p-2 hover:bg-gray-200 rounded-lg"><i data-lucide="x" class="w-5 h-5"></i></button>
+                        </div>
+                        <form class="p-4 space-y-4">
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
+                                    <select id="tipo" class="w-full p-3 border rounded-lg">
+                                        <option value="receita">Receita</option>
+                                        <option value="despesa">Despesa</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Categoria</label>
+                                    <select id="categoria" class="w-full p-3 border rounded-lg">
+                                        <option value="locacao">Locação</option>
+                                        <option value="manutencao">Manutenção</option>
+                                        <option value="seguro">Seguro</option>
+                                        <option value="ipva">IPVA</option>
+                                        <option value="documentacao">Documentação</option>
+                                        <option value="combustivel">Combustível</option>
+                                        <option value="multa">Multa</option>
+                                        <option value="outros_frota">Outros</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Veículo (opcional)</label>
+                                <select id="veiculo_id" class="w-full p-3 border rounded-lg">
+                                    <option value="">Nenhum</option>
+                                    ${state.dados.veiculos.map(v => `<option value="${v.id}">${v.marca} ${v.modelo} - ${v.placa}</option>`).join('')}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Descrição</label>
+                                <input type="text" id="descricao" required class="w-full p-3 border rounded-lg" placeholder="Locação semanal">
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Valor</label>
+                                    <input type="number" id="valor" required class="w-full p-3 border rounded-lg">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Data</label>
+                                    <input type="date" id="data" value="${new Date().toISOString().split('T')[0]}" class="w-full p-3 border rounded-lg">
+                                </div>
+                            </div>
+                        </form>
+                        <div class="flex justify-end gap-3 p-4 border-t bg-gray-50">
+                            <button onclick="fecharModal()" class="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg">Cancelar</button>
+                            <button onclick="salvarTransacaoFrota()" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">Salvar</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        };
+
+        const salvarTransacaoFrota = async () => {
+            const dados = {
+                tipo: document.getElementById('tipo').value,
+                categoria: document.getElementById('categoria').value,
+                descricao: document.getElementById('descricao').value,
+                valor: parseFloat(document.getElementById('valor').value) || 0,
+                data: document.getElementById('data').value,
+                veiculo_id: document.getElementById('veiculo_id').value || null
+            };
+
+            const result = await salvarItem('transacoes', dados);
+            if (result) {
+                await carregarTodosDados();
+                fecharModal();
+            }
+        };
+
+        const renderModalTransacaoConsorcio = () => {
+            return `
+                <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg fade-in">
+                        <div class="flex items-center justify-between p-4 border-b bg-gray-50">
+                            <h3 class="text-lg font-semibold text-gray-800">Nova Movimentação - Consórcio</h3>
+                            <button onclick="fecharModal()" class="p-2 hover:bg-gray-200 rounded-lg"><i data-lucide="x" class="w-5 h-5"></i></button>
+                        </div>
+                        <form class="p-4 space-y-4">
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
+                                    <select id="tipo" class="w-full p-3 border rounded-lg">
+                                        <option value="despesa">Despesa</option>
+                                        <option value="receita">Receita</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Categoria</label>
+                                    <select id="categoria" class="w-full p-3 border rounded-lg">
+                                        <option value="consorcio">Parcela</option>
+                                        <option value="aporte">Aporte Extra</option>
+                                        <option value="lance">Lance</option>
+                                        <option value="contemplacao">Contemplação</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Consórcio</label>
+                                <select id="consorcio_id" class="w-full p-3 border rounded-lg">
+                                    <option value="">Selecione</option>
+                                    ${state.dados.consorcios.map(c => `<option value="${c.id}">${c.administradora} - ${formatarMoeda(c.valor_carta)}</option>`).join('')}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">Descrição</label>
+                                <input type="text" id="descricao" required class="w-full p-3 border rounded-lg" placeholder="Parcela 25/80">
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Valor</label>
+                                    <input type="number" id="valor" required class="w-full p-3 border rounded-lg">
+                                </div>
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 mb-1">Data</label>
+                                    <input type="date" id="data" value="${new Date().toISOString().split('T')[0]}" class="w-full p-3 border rounded-lg">
+                                </div>
+                            </div>
+                        </form>
+                        <div class="flex justify-end gap-3 p-4 border-t bg-gray-50">
+                            <button onclick="fecharModal()" class="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg">Cancelar</button>
+                            <button onclick="salvarTransacaoConsorcio()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Salvar</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        };
+
+        const salvarTransacaoConsorcio = async () => {
+            const dados = {
+                tipo: document.getElementById('tipo').value,
+                categoria: document.getElementById('categoria').value,
+                descricao: document.getElementById('descricao').value,
+                valor: parseFloat(document.getElementById('valor').value) || 0,
+                data: document.getElementById('data').value,
+                consorcio_id: document.getElementById('consorcio_id').value || null
+            };
+
+            const result = await salvarItem('transacoes', dados);
+            if (result) {
+                await carregarTodosDados();
+                fecharModal();
+            }
+        };
+
+        // Confirmação
+        const confirmarExclusao = (tabela, id, nome) => {
+            state.confirmacao = { tabela, id, nome };
+            render();
+        };
+
+        const executarExclusao = async () => {
+            if (state.confirmacao) {
+                const ok = await excluirItem(state.confirmacao.tabela, state.confirmacao.id);
+                if (ok) {
+                    await carregarTodosDados();
+                }
+                state.confirmacao = null;
+                render();
+            }
+        };
+
+        const cancelarExclusao = () => {
+            state.confirmacao = null;
+            render();
+        };
+
+        const renderConfirmacao = () => {
+            if (!state.confirmacao) return '';
+            return `
+                <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div class="bg-white rounded-xl shadow-2xl p-6 max-w-sm w-full fade-in">
+                        <h3 class="text-lg font-semibold text-gray-800 mb-2">Confirmar Exclusão</h3>
+                        <p class="text-gray-600 mb-4">Excluir <strong>${state.confirmacao.nome}</strong>?</p>
+                        <div class="flex justify-end gap-3">
+                            <button onclick="cancelarExclusao()" class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg">Cancelar</button>
+                            <button onclick="executarExclusao()" class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700">Excluir</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        };
+
+        // =====================================================
+        // DASHBOARD
+        // =====================================================
+        const renderDashboard = () => {
+            const abas = [
+                { id: 'visaoGeral', label: 'Visão Geral', icone: 'home' },
+                { id: 'consorcios', label: 'Consórcios', icone: 'credit-card' },
+                { id: 'frota', label: 'Frota', icone: 'car' },
+                { id: 'motoristas', label: 'Motoristas', icone: 'user-check' },
+                { id: 'finFrota', label: 'Fin. Frota', icone: 'trending-up' },
+            ];
+
+            const renderAba = () => {
+                switch(state.abaAtiva) {
+                    case 'visaoGeral': return renderVisaoGeral();
+                    case 'consorcios': return renderConsorcios();
+                    case 'frota': return renderFrota();
+                    case 'motoristas': return renderMotoristas();
+                    case 'finFrota': return renderFinanceiroFrota();
+                    default: return renderVisaoGeral();
+                }
+            };
+
+            return `
+                <div class="min-h-screen bg-gray-100">
+                    <header class="header-gradient text-white shadow-lg">
+                        <div class="max-w-7xl mx-auto px-4 py-4">
+                            <div class="flex items-center justify-between">
+                                <div class="flex items-center gap-3">
+                                    <button onclick="toggleMenu()" class="lg:hidden p-2 hover:bg-white/10 rounded-lg">
+                                        <i data-lucide="menu" class="w-6 h-6"></i>
+                                    </button>
+                                    <div class="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
+                                        <i data-lucide="car" class="w-6 h-6"></i>
+                                    </div>
+                                    <div>
+                                        <h1 class="text-lg font-bold">${state.empresa?.nome || 'Gestão de Frota'}</h1>
+                                        <p class="text-blue-200 text-xs">Consórcios & Locação</p>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-4">
+                                    <div class="hidden sm:block text-right">
+                                        <p class="text-sm text-blue-200">${state.usuario?.nome || ''}</p>
+                                        <p class="text-xs text-blue-300">${state.usuario?.email || ''}</p>
+                                    </div>
+                                    <button onclick="fazerLogout()" class="p-2 hover:bg-white/10 rounded-lg" title="Sair">
+                                        <i data-lucide="log-out" class="w-5 h-5"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div class="flex">
+                        <aside class="${state.menuAberto ? 'block' : 'hidden'} lg:block fixed lg:static inset-0 z-40 lg:z-0">
+                            <div class="absolute inset-0 bg-black/50 lg:hidden" onclick="toggleMenu()"></div>
+                            <nav class="relative w-64 h-full lg:h-auto bg-white shadow-lg lg:shadow-none lg:min-h-screen">
+                                <div class="p-4 space-y-1">
+                                    ${abas.map(aba => `
+                                        <button onclick="mudarAba('${aba.id}')"
+                                            class="sidebar-item w-full flex items-center gap-3 px-4 py-3 rounded-lg font-medium transition text-left ${state.abaAtiva === aba.id ? 'active' : 'text-gray-600 hover:bg-gray-100'}">
+                                            <i data-lucide="${aba.icone}" class="w-5 h-5"></i>
+                                            <span class="text-sm">${aba.label}</span>
+                                        </button>
+                                    `).join('')}
+                                </div>
+                            </nav>
+                        </aside>
+
+                        <main class="flex-1 p-4 lg:p-6 max-w-full overflow-x-hidden">
+                            ${renderAba()}
+                        </main>
+                    </div>
+
+                    ${renderModal()}
+                    ${renderConfirmacao()}
+                </div>
+            `;
+        };
+
+        // =====================================================
+        // RENDER PRINCIPAL
+        // =====================================================
+        const render = () => {
+            const app = document.getElementById('app');
+            
+            if (state.loading) {
+                app.innerHTML = `
+                    <div class="min-h-screen flex items-center justify-center bg-gray-100">
+                        <div class="text-center">
+                            <div class="loader mx-auto mb-4"></div>
+                            <p class="text-gray-600">Carregando...</p>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+
+            if (!state.user) {
+                app.innerHTML = renderLogin();
+            } else {
+                app.innerHTML = renderDashboard();
+            }
+
+            lucide.createIcons();
+        };
+
+        // =====================================================
+        // INICIALIZAÇÃO
+        // =====================================================
+        const init = async () => {
+            // Verificar sessão
+            const { data: { session } } = await db.auth.getSession();
+            
+            if (session?.user) {
+                state.user = session.user;
+                const loaded = await carregarDadosUsuario(session.user.id);
+                if (loaded) {
+                    await carregarTodosDados();
+                }
+            }
+
+            state.loading = false;
+            render();
+
+            // Listener de auth
+            db.auth.onAuthStateChange(async (event, session) => {
+                if (event === 'SIGNED_IN' && session?.user) {
+                    state.user = session.user;
+                    state.loading = true;
+                    render();
+                    
+                    const loaded = await carregarDadosUsuario(session.user.id);
+                    if (loaded) {
+                        await carregarTodosDados();
+                    }
+                    state.loading = false;
+                    render();
+                } else if (event === 'SIGNED_OUT') {
+                    state.user = null;
+                    state.usuario = null;
+                    state.empresa = null;
+                    render();
+                }
+            });
+        };
+
+        init();
+    </script>
+</body>
+</html>
