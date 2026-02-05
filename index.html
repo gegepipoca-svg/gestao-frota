@@ -111,11 +111,16 @@
         
         const carregarDadosUsuario = async (authId) => {
             try {
-                const { data, error } = await supabase
+                const { data, error } = await db
                     .from('usuarios')
                     .select('*, empresas(*)')
                     .eq('auth_id', authId)
                     .single();
+                
+                if (error) {
+                    console.error('Erro ao buscar usuário:', error);
+                    return false;
+                }
                 
                 if (data) {
                     state.usuario = data;
@@ -136,14 +141,14 @@
             
             try {
                 const [consorcios, veiculos, motoristas, contratos, fornecedores, manutencoes, transacoes, usuarios] = await Promise.all([
-                    supabase.from('consorcios').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
-                    supabase.from('veiculos').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
-                    supabase.from('motoristas').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
-                    supabase.from('contratos').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
-                    supabase.from('fornecedores').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
-                    supabase.from('manutencoes').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
-                    supabase.from('transacoes').select('*').eq('empresa_id', empresaId).order('data', { ascending: false }),
-                    supabase.from('usuarios').select('*').eq('empresa_id', empresaId)
+                    db.from('consorcios').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
+                    db.from('veiculos').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
+                    db.from('motoristas').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
+                    db.from('contratos').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
+                    db.from('fornecedores').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
+                    db.from('manutencoes').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
+                    db.from('transacoes').select('*').eq('empresa_id', empresaId).order('data', { ascending: false }),
+                    db.from('usuarios').select('*').eq('empresa_id', empresaId)
                 ]);
 
                 state.dados = {
@@ -163,6 +168,12 @@
 
         const salvarItem = async (tabela, dados, id = null) => {
             try {
+                // Validação de segurança
+                if (!id && !state.empresa?.id) {
+                    alert('Erro: Empresa não carregada. Faça logout e login novamente.');
+                    return null;
+                }
+                
                 if (id) {
                     const { data, error } = await db.from(tabela).update(dados).eq('id', id).select().single();
                     if (error) throw error;
@@ -212,7 +223,7 @@
                 if (authError) throw authError;
 
                 // 2. Criar empresa
-                const { data: empresaData, error: empresaError } = await supabase
+                const { data: empresaData, error: empresaError } = await db
                     .from('empresas')
                     .insert({ nome: nomeEmpresa })
                     .select()
