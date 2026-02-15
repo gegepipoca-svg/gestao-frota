@@ -1059,7 +1059,7 @@
                     <div class="bg-white rounded-xl shadow-lg overflow-hidden">
                         <div class="p-4 bg-gray-50 border-b flex items-center justify-between">
                             <h3 class="font-semibold text-gray-800">Movimentações do Período</h3>
-                            <span class="text-sm text-gray-500">{transacoesFrota.length} registro(s)</span>
+                            <span class="text-sm text-gray-500">${transacoesFrota.length} registro(s)</span>
                         </div>
                         ${transacoesFrota.length === 0 ? `
                             <div class="p-8 text-center text-gray-500">Nenhuma movimentação no período</div>
@@ -1078,11 +1078,14 @@
                                                     <p class="text-sm text-gray-500">${t.categoria} ${veiculo ? '• ' + veiculo.placa : ''} • ${formatarDataCompleta(t.data)}</p>
                                                 </div>
                                             </div>
-                                            <div class="flex items-center gap-3">
+                                            <div class="flex items-center gap-2">
                                                 <span class="font-bold ${t.tipo === 'receita' ? 'text-green-600' : 'text-red-600'}">
                                                     ${t.tipo === 'receita' ? '+' : '-'} ${formatarMoeda(t.valor)}
                                                 </span>
-                                                <button onclick="confirmarExclusao('transacoes', '${t.id}', 'esta movimentação')" class="p-1.5 hover:bg-red-100 rounded">
+                                                <button onclick="editarTransacaoFrota('${t.id}')" class="p-1.5 hover:bg-blue-100 rounded" title="Editar">
+                                                    <i data-lucide="edit-2" class="w-4 h-4 text-blue-500"></i>
+                                                </button>
+                                                <button onclick="confirmarExclusao('transacoes', '${t.id}', 'esta movimentação')" class="p-1.5 hover:bg-red-100 rounded" title="Excluir">
                                                     <i data-lucide="trash-2" class="w-4 h-4 text-red-500"></i>
                                                 </button>
                                             </div>
@@ -1218,11 +1221,14 @@
                                                     <p class="text-sm text-gray-500">${categoriaLabel} ${consorcio ? '• ' + consorcio.administradora : ''} • ${formatarDataCompleta(t.data)}</p>
                                                 </div>
                                             </div>
-                                            <div class="flex items-center gap-3">
+                                            <div class="flex items-center gap-2">
                                                 <span class="font-bold ${t.tipo === 'receita' ? 'text-green-600' : 'text-red-600'}">
                                                     ${t.tipo === 'receita' ? '+' : '-'} ${formatarMoeda(t.valor)}
                                                 </span>
-                                                <button onclick="confirmarExclusao('transacoes', '${t.id}', 'esta movimentação')" class="p-1.5 hover:bg-red-100 rounded">
+                                                <button onclick="editarTransacaoConsorcio('${t.id}')" class="p-1.5 hover:bg-blue-100 rounded" title="Editar">
+                                                    <i data-lucide="edit-2" class="w-4 h-4 text-blue-500"></i>
+                                                </button>
+                                                <button onclick="confirmarExclusao('transacoes', '${t.id}', 'esta movimentação')" class="p-1.5 hover:bg-red-100 rounded" title="Excluir">
                                                     <i data-lucide="trash-2" class="w-4 h-4 text-red-500"></i>
                                                 </button>
                                             </div>
@@ -1544,54 +1550,57 @@
         };
 
         const renderModalTransacaoFrota = () => {
+            const d = state.modal.dados || {};
+            const isEdit = !!d.id;
             return `
                 <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
                     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg fade-in">
                         <div class="flex items-center justify-between p-4 border-b bg-gray-50">
-                            <h3 class="text-lg font-semibold text-gray-800">Nova Movimentação - Frota</h3>
+                            <h3 class="text-lg font-semibold text-gray-800">${isEdit ? 'Editar' : 'Nova'} Movimentação - Frota</h3>
                             <button onclick="fecharModal()" class="p-2 hover:bg-gray-200 rounded-lg"><i data-lucide="x" class="w-5 h-5"></i></button>
                         </div>
                         <form class="p-4 space-y-4">
+                            <input type="hidden" id="transacao_id_frota" value="${d.id || ''}">
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
-                                    <select id="tipo" class="w-full p-3 border rounded-lg">
-                                        <option value="receita">Receita (Entrada)</option>
-                                        <option value="despesa">Despesa (Saída)</option>
+                                    <select id="tipo_frota" class="w-full p-3 border rounded-lg">
+                                        <option value="receita" ${d.tipo === 'receita' ? 'selected' : ''}>Receita (Entrada)</option>
+                                        <option value="despesa" ${d.tipo === 'despesa' ? 'selected' : ''}>Despesa (Saída)</option>
                                     </select>
                                 </div>
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-1">Categoria</label>
-                                    <select id="categoria" class="w-full p-3 border rounded-lg">
-                                        ${CATEGORIAS_FROTA.map(c => `<option value="${c.value}">${c.label}</option>`).join('')}
+                                    <select id="categoria_frota" class="w-full p-3 border rounded-lg">
+                                        ${CATEGORIAS_FROTA.map(c => `<option value="${c.value}" ${d.categoria === c.value ? 'selected' : ''}>${c.label}</option>`).join('')}
                                     </select>
                                 </div>
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Veículo (opcional)</label>
-                                <select id="veiculo_id" class="w-full p-3 border rounded-lg">
+                                <select id="veiculo_id_frota" class="w-full p-3 border rounded-lg">
                                     <option value="">Nenhum / Geral</option>
-                                    ${state.dados.veiculos.map(v => `<option value="${v.id}">${v.marca} ${v.modelo} - ${v.placa}</option>`).join('')}
+                                    ${state.dados.veiculos.map(v => `<option value="${v.id}" ${d.veiculo_id === v.id ? 'selected' : ''}>${v.marca} ${v.modelo} - ${v.placa}</option>`).join('')}
                                 </select>
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Descrição</label>
-                                <input type="text" id="descricao" required class="w-full p-3 border rounded-lg" placeholder="Ex: Locação semanal">
+                                <input type="text" id="descricao_frota" value="${d.descricao || ''}" required class="w-full p-3 border rounded-lg" placeholder="Ex: Locação semanal">
                             </div>
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-1">Valor</label>
-                                    <input type="number" step="0.01" id="valor" required class="w-full p-3 border rounded-lg" placeholder="0,00">
+                                    <input type="number" step="0.01" id="valor_frota" value="${d.valor || ''}" required class="w-full p-3 border rounded-lg" placeholder="0,00">
                                 </div>
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-1">Data</label>
-                                    <input type="date" id="data" value="${new Date().toISOString().split('T')[0]}" class="w-full p-3 border rounded-lg">
+                                    <input type="date" id="data_frota" value="${d.data || new Date().toISOString().split('T')[0]}" min="2020-01-01" max="2030-12-31" class="w-full p-3 border rounded-lg">
                                 </div>
                             </div>
                         </form>
                         <div class="flex justify-end gap-3 p-4 border-t bg-gray-50">
                             <button onclick="fecharModal()" class="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg">Cancelar</button>
-                            <button onclick="salvarTransacaoFrota()" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">Salvar</button>
+                            <button onclick="salvarTransacaoFrota()" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">${isEdit ? 'Atualizar' : 'Salvar'}</button>
                         </div>
                     </div>
                 </div>
@@ -1599,43 +1608,62 @@
         };
 
         const salvarTransacaoFrota = async () => {
+            const id = document.getElementById('transacao_id_frota')?.value;
+            const dataInput = document.getElementById('data_frota');
+            const dataValor = dataInput ? dataInput.value : new Date().toISOString().split('T')[0];
+            
+            console.log('Data capturada Frota:', dataValor); // Debug
+            
             const dados = {
-                tipo: document.getElementById('tipo').value,
-                categoria: document.getElementById('categoria').value,
-                descricao: document.getElementById('descricao').value,
-                valor: parseFloat(document.getElementById('valor').value) || 0,
-                data: document.getElementById('data').value,
-                veiculo_id: document.getElementById('veiculo_id').value || null
+                tipo: document.getElementById('tipo_frota').value,
+                categoria: document.getElementById('categoria_frota').value,
+                descricao: document.getElementById('descricao_frota').value,
+                valor: parseFloat(document.getElementById('valor_frota').value) || 0,
+                data: dataValor,
+                veiculo_id: document.getElementById('veiculo_id_frota').value || null
             };
 
-            const result = await salvarItem('transacoes', dados);
+            console.log('Dados a salvar Frota:', dados); // Debug
+
+            const result = await salvarItem('transacoes', dados, id || null);
             if (result) {
                 await carregarTodosDados();
                 fecharModal();
             }
         };
 
+        const editarTransacaoFrota = (id) => {
+            const transacao = state.dados.transacoes.find(t => t.id === id);
+            if (transacao) {
+                state.modal = { tipo: 'transacaoFrota', dados: transacao };
+                render();
+            }
+        };
+
         const renderModalTransacaoConsorcio = () => {
+            const d = state.modal.dados || {};
+            const isEdit = !!d.id;
             return `
                 <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
                     <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg fade-in">
                         <div class="flex items-center justify-between p-4 border-b bg-gray-50">
-                            <h3 class="text-lg font-semibold text-gray-800">Nova Movimentação - Consórcio</h3>
+                            <h3 class="text-lg font-semibold text-gray-800">${isEdit ? 'Editar' : 'Nova'} Movimentação - Consórcio</h3>
                             <button onclick="fecharModal()" class="p-2 hover:bg-gray-200 rounded-lg"><i data-lucide="x" class="w-5 h-5"></i></button>
                         </div>
                         <form class="p-4 space-y-4">
+                            <input type="hidden" id="transacao_id_cons" value="${d.id || ''}">
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
-                                    <select id="tipo" class="w-full p-3 border rounded-lg">
-                                        <option value="despesa">Despesa (Saída)</option>
-                                        <option value="receita">Receita (Entrada)</option>
+                                    <select id="tipo_cons" class="w-full p-3 border rounded-lg">
+                                        <option value="despesa" ${d.tipo === 'despesa' ? 'selected' : ''}>Despesa (Saída)</option>
+                                        <option value="receita" ${d.tipo === 'receita' ? 'selected' : ''}>Receita (Entrada)</option>
                                     </select>
                                 </div>
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-1">Categoria</label>
-                                    <select id="categoria" class="w-full p-3 border rounded-lg">
-                                        ${CATEGORIAS_CONSORCIO.map(c => `<option value="${c.value}">${c.label}</option>`).join('')}
+                                    <select id="categoria_cons" class="w-full p-3 border rounded-lg">
+                                        ${CATEGORIAS_CONSORCIO.map(c => `<option value="${c.value}" ${d.categoria === c.value ? 'selected' : ''}>${c.label}</option>`).join('')}
                                     </select>
                                 </div>
                             </div>
@@ -1643,27 +1671,27 @@
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Consórcio</label>
                                 <select id="consorcio_id" class="w-full p-3 border rounded-lg">
                                     <option value="">Selecione (opcional)</option>
-                                    ${state.dados.consorcios.map(c => `<option value="${c.id}">${c.administradora} - ${formatarMoeda(c.valor_carta)}</option>`).join('')}
+                                    ${state.dados.consorcios.map(c => `<option value="${c.id}" ${d.consorcio_id === c.id ? 'selected' : ''}>${c.administradora} - ${formatarMoeda(c.valor_carta)}</option>`).join('')}
                                 </select>
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Descrição</label>
-                                <input type="text" id="descricao" required class="w-full p-3 border rounded-lg" placeholder="Ex: Parcela 25/80">
+                                <input type="text" id="descricao_cons" value="${d.descricao || ''}" required class="w-full p-3 border rounded-lg" placeholder="Ex: Parcela 25/80">
                             </div>
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-1">Valor</label>
-                                    <input type="number" step="0.01" id="valor" required class="w-full p-3 border rounded-lg" placeholder="0,00">
+                                    <input type="number" step="0.01" id="valor_cons" value="${d.valor || ''}" required class="w-full p-3 border rounded-lg" placeholder="0,00">
                                 </div>
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-1">Data</label>
-                                    <input type="date" id="data" value="${new Date().toISOString().split('T')[0]}" class="w-full p-3 border rounded-lg">
+                                    <input type="date" id="data_cons" value="${d.data || new Date().toISOString().split('T')[0]}" min="2020-01-01" max="2030-12-31" class="w-full p-3 border rounded-lg">
                                 </div>
                             </div>
                         </form>
                         <div class="flex justify-end gap-3 p-4 border-t bg-gray-50">
                             <button onclick="fecharModal()" class="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded-lg">Cancelar</button>
-                            <button onclick="salvarTransacaoConsorcio()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Salvar</button>
+                            <button onclick="salvarTransacaoConsorcio()" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">${isEdit ? 'Atualizar' : 'Salvar'}</button>
                         </div>
                     </div>
                 </div>
@@ -1671,19 +1699,35 @@
         };
 
         const salvarTransacaoConsorcio = async () => {
+            const id = document.getElementById('transacao_id_cons')?.value;
+            const dataInput = document.getElementById('data_cons');
+            const dataValor = dataInput ? dataInput.value : new Date().toISOString().split('T')[0];
+            
+            console.log('Data capturada Consórcio:', dataValor); // Debug
+            
             const dados = {
-                tipo: document.getElementById('tipo').value,
-                categoria: document.getElementById('categoria').value,
-                descricao: document.getElementById('descricao').value,
-                valor: parseFloat(document.getElementById('valor').value) || 0,
-                data: document.getElementById('data').value,
+                tipo: document.getElementById('tipo_cons').value,
+                categoria: document.getElementById('categoria_cons').value,
+                descricao: document.getElementById('descricao_cons').value,
+                valor: parseFloat(document.getElementById('valor_cons').value) || 0,
+                data: dataValor,
                 consorcio_id: document.getElementById('consorcio_id').value || null
             };
 
-            const result = await salvarItem('transacoes', dados);
+            console.log('Dados a salvar Consórcio:', dados); // Debug
+
+            const result = await salvarItem('transacoes', dados, id || null);
             if (result) {
                 await carregarTodosDados();
                 fecharModal();
+            }
+        };
+
+        const editarTransacaoConsorcio = (id) => {
+            const transacao = state.dados.transacoes.find(t => t.id === id);
+            if (transacao) {
+                state.modal = { tipo: 'transacaoConsorcio', dados: transacao };
+                render();
             }
         };
 
