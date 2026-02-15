@@ -249,13 +249,24 @@
 
         const salvarItem = async (tabela, dados, id = null) => {
             try {
+                console.log('=== SALVAR ITEM ===');
+                console.log('Tabela:', tabela);
+                console.log('ID:', id);
+                console.log('Dados recebidos:', JSON.stringify(dados, null, 2));
+                
                 if (id) {
+                    console.log('Modo: UPDATE');
                     const { data, error } = await db.from(tabela).update(dados).eq('id', id).select().single();
                     if (error) throw error;
+                    console.log('Resultado UPDATE:', JSON.stringify(data, null, 2));
                     return data;
                 } else {
-                    const { data, error } = await db.from(tabela).insert({ ...dados, empresa_id: state.empresa.id }).select().single();
+                    const dadosCompletos = { ...dados, empresa_id: state.empresa.id };
+                    console.log('Modo: INSERT');
+                    console.log('Dados completos para INSERT:', JSON.stringify(dadosCompletos, null, 2));
+                    const { data, error } = await db.from(tabela).insert(dadosCompletos).select().single();
                     if (error) throw error;
+                    console.log('Resultado INSERT:', JSON.stringify(data, null, 2));
                     return data;
                 }
             } catch (e) {
@@ -1610,9 +1621,18 @@
         const salvarTransacaoFrota = async () => {
             const id = document.getElementById('transacao_id_frota')?.value;
             const dataInput = document.getElementById('data_frota');
-            const dataValor = dataInput ? dataInput.value : new Date().toISOString().split('T')[0];
             
-            console.log('Data capturada Frota:', dataValor); // Debug
+            // Debug detalhado
+            console.log('=== DEBUG SALVAR FROTA ===');
+            console.log('Campo data_frota encontrado:', dataInput);
+            console.log('Valor do campo:', dataInput?.value);
+            
+            if (!dataInput || !dataInput.value) {
+                alert('ERRO: Campo de data não encontrado ou vazio!');
+                return;
+            }
+            
+            const dataValor = dataInput.value;
             
             const dados = {
                 tipo: document.getElementById('tipo_frota').value,
@@ -1623,10 +1643,13 @@
                 veiculo_id: document.getElementById('veiculo_id_frota').value || null
             };
 
-            console.log('Dados a salvar Frota:', dados); // Debug
+            console.log('Dados completos a salvar:', JSON.stringify(dados, null, 2));
+            alert('Data que será salva: ' + dataValor);
 
             const result = await salvarItem('transacoes', dados, id || null);
             if (result) {
+                console.log('Resultado salvo:', result);
+                alert('Salvo! Data no resultado: ' + result.data);
                 await carregarTodosDados();
                 fecharModal();
             }
