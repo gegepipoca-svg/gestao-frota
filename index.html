@@ -14,6 +14,9 @@
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         .fade-in { animation: fadeIn 0.3s ease-in; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+        .card-hover:hover { transform: translateY(-2px); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.1); }
+        .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+        .scrollbar-thin::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen">
@@ -25,7 +28,7 @@
 
     <script>
         // =====================================================
-        // CONFIGURAÇÃO SUPABASE - SUAS CREDENCIAIS
+        // CONFIGURAÇÃO SUPABASE
         // =====================================================
         const SUPABASE_URL = 'https://fipsbtdabuxwmrkmlzgn.supabase.co';
         const SUPABASE_KEY = 'sb_publishable_i3o5m2kdFhBUaTj-34ev8A_ZvAZeefd';
@@ -41,6 +44,7 @@
             empresa: null,
             abaAtiva: 'visaoGeral',
             periodo: 'mes',
+            anoSelecionado: new Date().getFullYear(),
             menuAberto: false,
             modal: { tipo: null, dados: null },
             confirmacao: null,
@@ -57,6 +61,34 @@
             }
         };
 
+        // Anos disponíveis para seleção
+        const ANOS_DISPONIVEIS = [2022, 2023, 2024, 2025, 2026, 2027];
+
+        // Categorias de transação expandidas
+        const CATEGORIAS_FROTA = [
+            { value: 'locacao', label: 'Locação', tipo: 'receita' },
+            { value: 'manutencao', label: 'Manutenção', tipo: 'despesa' },
+            { value: 'seguro', label: 'Seguro', tipo: 'despesa' },
+            { value: 'ipva', label: 'IPVA', tipo: 'despesa' },
+            { value: 'documentacao', label: 'Documentação', tipo: 'despesa' },
+            { value: 'combustivel', label: 'Combustível', tipo: 'despesa' },
+            { value: 'multa', label: 'Multa', tipo: 'despesa' },
+            { value: 'comissao_frota', label: 'Comissão', tipo: 'ambos' },
+            { value: 'outros_frota', label: 'Outros', tipo: 'ambos' }
+        ];
+
+        const CATEGORIAS_CONSORCIO = [
+            { value: 'parcela', label: 'Pagamento Parcela', tipo: 'despesa' },
+            { value: 'parcela_cartao', label: 'Parcela (Cartão)', tipo: 'despesa' },
+            { value: 'parcela_boleto', label: 'Parcela (Boleto)', tipo: 'despesa' },
+            { value: 'aporte', label: 'Aporte Extra', tipo: 'despesa' },
+            { value: 'lance', label: 'Lance', tipo: 'despesa' },
+            { value: 'contemplacao', label: 'Contemplação', tipo: 'receita' },
+            { value: 'comissao_consorcio', label: 'Comissão', tipo: 'ambos' },
+            { value: 'taxa_admin', label: 'Taxa Administrativa', tipo: 'despesa' },
+            { value: 'outros_consorcio', label: 'Outros', tipo: 'ambos' }
+        ];
+
         // =====================================================
         // FUNÇÕES AUXILIARES
         // =====================================================
@@ -67,48 +99,102 @@
             return new Date(data + 'T00:00:00').toLocaleDateString('pt-BR');
         };
 
-        const getPeriodo = (tipo) => {
+        const formatarDataCompleta = (data) => {
+            if (!data) return '-';
+            const d = new Date(data + 'T00:00:00');
+            const dias = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+            return `${dias[d.getDay()]}, ${d.toLocaleDateString('pt-BR')}`;
+        };
+
+        const getPeriodo = (tipo, ano = state.anoSelecionado) => {
             const hoje = new Date();
             let inicio, fim;
+            
             switch (tipo) {
                 case 'hoje':
                     inicio = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
                     fim = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate(), 23, 59, 59);
+                    break;
+                case 'ontem':
+                    const ontem = new Date(hoje);
+                    ontem.setDate(ontem.getDate() - 1);
+                    inicio = new Date(ontem.getFullYear(), ontem.getMonth(), ontem.getDate());
+                    fim = new Date(ontem.getFullYear(), ontem.getMonth(), ontem.getDate(), 23, 59, 59);
                     break;
                 case 'semana':
                     const primeiroDiaSemana = hoje.getDate() - hoje.getDay();
                     inicio = new Date(hoje.getFullYear(), hoje.getMonth(), primeiroDiaSemana);
                     fim = new Date(hoje.getFullYear(), hoje.getMonth(), primeiroDiaSemana + 6, 23, 59, 59);
                     break;
+                case 'semana_passada':
+                    const inicioSemanaPassada = hoje.getDate() - hoje.getDay() - 7;
+                    inicio = new Date(hoje.getFullYear(), hoje.getMonth(), inicioSemanaPassada);
+                    fim = new Date(hoje.getFullYear(), hoje.getMonth(), inicioSemanaPassada + 6, 23, 59, 59);
+                    break;
                 case 'mes':
-                    inicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
-                    fim = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0, 23, 59, 59);
+                    inicio = new Date(ano, hoje.getMonth(), 1);
+                    fim = new Date(ano, hoje.getMonth() + 1, 0, 23, 59, 59);
+                    break;
+                case 'mes_passado':
+                    inicio = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
+                    fim = new Date(hoje.getFullYear(), hoje.getMonth(), 0, 23, 59, 59);
                     break;
                 case 'trimestre':
                     const trim = Math.floor(hoje.getMonth() / 3);
-                    inicio = new Date(hoje.getFullYear(), trim * 3, 1);
-                    fim = new Date(hoje.getFullYear(), trim * 3 + 3, 0, 23, 59, 59);
+                    inicio = new Date(ano, trim * 3, 1);
+                    fim = new Date(ano, trim * 3 + 3, 0, 23, 59, 59);
                     break;
                 case 'semestre':
                     const sem = Math.floor(hoje.getMonth() / 6);
-                    inicio = new Date(hoje.getFullYear(), sem * 6, 1);
-                    fim = new Date(hoje.getFullYear(), sem * 6 + 6, 0, 23, 59, 59);
+                    inicio = new Date(ano, sem * 6, 1);
+                    fim = new Date(ano, sem * 6 + 6, 0, 23, 59, 59);
                     break;
                 case 'ano':
-                    inicio = new Date(hoje.getFullYear(), 0, 1);
-                    fim = new Date(hoje.getFullYear(), 11, 31, 23, 59, 59);
+                    inicio = new Date(ano, 0, 1);
+                    fim = new Date(ano, 11, 31, 23, 59, 59);
                     break;
+                // Meses específicos
+                case 'janeiro': inicio = new Date(ano, 0, 1); fim = new Date(ano, 1, 0, 23, 59, 59); break;
+                case 'fevereiro': inicio = new Date(ano, 1, 1); fim = new Date(ano, 2, 0, 23, 59, 59); break;
+                case 'marco': inicio = new Date(ano, 2, 1); fim = new Date(ano, 3, 0, 23, 59, 59); break;
+                case 'abril': inicio = new Date(ano, 3, 1); fim = new Date(ano, 4, 0, 23, 59, 59); break;
+                case 'maio': inicio = new Date(ano, 4, 1); fim = new Date(ano, 5, 0, 23, 59, 59); break;
+                case 'junho': inicio = new Date(ano, 5, 1); fim = new Date(ano, 6, 0, 23, 59, 59); break;
+                case 'julho': inicio = new Date(ano, 6, 1); fim = new Date(ano, 7, 0, 23, 59, 59); break;
+                case 'agosto': inicio = new Date(ano, 7, 1); fim = new Date(ano, 8, 0, 23, 59, 59); break;
+                case 'setembro': inicio = new Date(ano, 8, 1); fim = new Date(ano, 9, 0, 23, 59, 59); break;
+                case 'outubro': inicio = new Date(ano, 9, 1); fim = new Date(ano, 10, 0, 23, 59, 59); break;
+                case 'novembro': inicio = new Date(ano, 10, 1); fim = new Date(ano, 11, 0, 23, 59, 59); break;
+                case 'dezembro': inicio = new Date(ano, 11, 1); fim = new Date(ano, 12, 0, 23, 59, 59); break;
                 default:
-                    inicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
-                    fim = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0, 23, 59, 59);
+                    inicio = new Date(ano, 0, 1);
+                    fim = new Date(ano, 11, 31, 23, 59, 59);
             }
             return { inicio: inicio.toISOString().split('T')[0], fim: fim.toISOString().split('T')[0] };
+        };
+
+        const getNomePeriodo = (tipo) => {
+            const nomes = {
+                hoje: 'Hoje',
+                ontem: 'Ontem',
+                semana: 'Esta Semana',
+                semana_passada: 'Semana Passada',
+                mes: 'Este Mês',
+                mes_passado: 'Mês Passado',
+                trimestre: 'Este Trimestre',
+                semestre: 'Este Semestre',
+                ano: `Ano ${state.anoSelecionado}`,
+                janeiro: 'Janeiro', fevereiro: 'Fevereiro', marco: 'Março',
+                abril: 'Abril', maio: 'Maio', junho: 'Junho',
+                julho: 'Julho', agosto: 'Agosto', setembro: 'Setembro',
+                outubro: 'Outubro', novembro: 'Novembro', dezembro: 'Dezembro'
+            };
+            return nomes[tipo] || tipo;
         };
 
         // =====================================================
         // FUNÇÕES DO SUPABASE
         // =====================================================
-        
         const carregarDadosUsuario = async (authId) => {
             try {
                 const { data, error } = await db
@@ -116,11 +202,6 @@
                     .select('*, empresas(*)')
                     .eq('auth_id', authId)
                     .single();
-                
-                if (error) {
-                    console.error('Erro ao buscar usuário:', error);
-                    return false;
-                }
                 
                 if (data) {
                     state.usuario = data;
@@ -141,11 +222,11 @@
             
             try {
                 const [consorcios, veiculos, motoristas, contratos, fornecedores, manutencoes, transacoes, usuarios] = await Promise.all([
-                    db.from('consorcios').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
-                    db.from('veiculos').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
-                    db.from('motoristas').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
+                    db.from('consorcios').select('*').eq('empresa_id', empresaId).eq('ativo', true).order('created_at', { ascending: false }),
+                    db.from('veiculos').select('*').eq('empresa_id', empresaId).eq('ativo', true).order('created_at', { ascending: false }),
+                    db.from('motoristas').select('*').eq('empresa_id', empresaId).eq('ativo', true).order('created_at', { ascending: false }),
                     db.from('contratos').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
-                    db.from('fornecedores').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
+                    db.from('fornecedores').select('*').eq('empresa_id', empresaId).eq('ativo', true).order('created_at', { ascending: false }),
                     db.from('manutencoes').select('*').eq('empresa_id', empresaId).order('created_at', { ascending: false }),
                     db.from('transacoes').select('*').eq('empresa_id', empresaId).order('data', { ascending: false }),
                     db.from('usuarios').select('*').eq('empresa_id', empresaId)
@@ -168,12 +249,6 @@
 
         const salvarItem = async (tabela, dados, id = null) => {
             try {
-                // Validação de segurança
-                if (!id && !state.empresa?.id) {
-                    alert('Erro: Empresa não carregada. Faça logout e login novamente.');
-                    return null;
-                }
-                
                 if (id) {
                     const { data, error } = await db.from(tabela).update(dados).eq('id', id).select().single();
                     if (error) throw error;
@@ -205,7 +280,6 @@
         // =====================================================
         // AUTENTICAÇÃO
         // =====================================================
-        
         const fazerLogin = async (email, senha) => {
             try {
                 const { data, error } = await db.auth.signInWithPassword({ email, password: senha });
@@ -218,11 +292,9 @@
 
         const fazerCadastro = async (email, senha, nome, nomeEmpresa) => {
             try {
-                // 1. Criar usuário no Auth
                 const { data: authData, error: authError } = await db.auth.signUp({ email, password: senha });
                 if (authError) throw authError;
 
-                // 2. Criar empresa
                 const { data: empresaData, error: empresaError } = await db
                     .from('empresas')
                     .insert({ nome: nomeEmpresa })
@@ -230,14 +302,12 @@
                     .single();
                 if (empresaError) throw empresaError;
 
-                // 3. Criar configurações
                 await db.from('configuracoes').insert({
                     empresa_id: empresaData.id,
                     locacao_semanal: 650,
                     locacao_mensal: 2400
                 });
 
-                // 4. Criar usuário
                 const { error: usuarioError } = await db.from('usuarios').insert({
                     auth_id: authData.user.id,
                     empresa_id: empresaData.id,
@@ -312,34 +382,21 @@
                             
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Seu Nome</label>
-                                <input type="text" id="cadastroNome" required
-                                    class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                                    placeholder="João Silva">
+                                <input type="text" id="cadastroNome" required class="w-full p-3 border rounded-lg" placeholder="João Silva">
                             </div>
-
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Nome da Empresa</label>
-                                <input type="text" id="cadastroEmpresa" required
-                                    class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                                    placeholder="Minha Locadora">
+                                <input type="text" id="cadastroEmpresa" required class="w-full p-3 border rounded-lg" placeholder="Minha Locadora">
                             </div>
-
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                                <input type="email" id="cadastroEmail" required
-                                    class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                                    placeholder="seu@email.com">
+                                <input type="email" id="cadastroEmail" required class="w-full p-3 border rounded-lg" placeholder="seu@email.com">
                             </div>
-
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Senha (mín. 6 caracteres)</label>
-                                <input type="password" id="cadastroSenha" required minlength="6"
-                                    class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                                    placeholder="••••••••">
+                                <input type="password" id="cadastroSenha" required minlength="6" class="w-full p-3 border rounded-lg" placeholder="••••••••">
                             </div>
-
-                            <button onclick="handleCadastro()" id="btnCadastro"
-                                class="w-full py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition">
+                            <button onclick="handleCadastro()" id="btnCadastro" class="w-full py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition">
                                 Criar Conta
                             </button>
                         </div>
@@ -425,10 +482,10 @@
         };
 
         // =====================================================
-        // COMPONENTES
+        // COMPONENTES REUTILIZÁVEIS
         // =====================================================
         const CardResumo = (titulo, valor, icone, cor, subtitulo = '') => `
-            <div class="bg-white rounded-xl shadow-lg p-5 border-l-4 ${cor}">
+            <div class="bg-white rounded-xl shadow-lg p-5 border-l-4 ${cor} card-hover transition-all">
                 <div class="flex items-center justify-between">
                     <div>
                         <p class="text-gray-500 text-sm font-medium">${titulo}</p>
@@ -443,13 +500,36 @@
         `;
 
         const FiltroPeriodo = () => `
-            <div class="flex flex-wrap gap-2">
-                ${['hoje', 'semana', 'mes', 'trimestre', 'semestre', 'ano'].map(p => `
-                    <button onclick="mudarPeriodo('${p}')"
-                        class="px-3 py-1.5 rounded-lg text-sm font-medium transition ${
-                            state.periodo === p ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            <div class="flex flex-wrap items-center gap-2">
+                <!-- Seletor de Ano -->
+                <select onchange="mudarAno(this.value)" class="px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-800 text-white border-0 cursor-pointer">
+                    ${ANOS_DISPONIVEIS.map(ano => `
+                        <option value="${ano}" ${state.anoSelecionado === ano ? 'selected' : ''}>${ano}</option>
+                    `).join('')}
+                </select>
+                
+                <!-- Filtros Rápidos -->
+                <div class="flex flex-wrap gap-1">
+                    ${['hoje', 'ontem', 'semana', 'mes', 'trimestre', 'ano'].map(p => `
+                        <button onclick="mudarPeriodo('${p}')"
+                            class="px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                                state.periodo === p ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                            }">
+                            ${getNomePeriodo(p)}
+                        </button>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+
+        const FiltroMeses = () => `
+            <div class="flex flex-wrap gap-1 mt-2">
+                ${['janeiro', 'fevereiro', 'marco', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'].map(m => `
+                    <button onclick="mudarPeriodo('${m}')"
+                        class="px-2 py-1 rounded text-xs font-medium transition ${
+                            state.periodo === m ? 'bg-blue-600 text-white' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
                         }">
-                        ${p.charAt(0).toUpperCase() + p.slice(1)}
+                        ${m.charAt(0).toUpperCase() + m.slice(1, 3)}
                     </button>
                 `).join('')}
             </div>
@@ -457,6 +537,11 @@
 
         const mudarPeriodo = (p) => {
             state.periodo = p;
+            render();
+        };
+
+        const mudarAno = (ano) => {
+            state.anoSelecionado = parseInt(ano);
             render();
         };
 
@@ -472,104 +557,217 @@
         };
 
         // =====================================================
-        // VISÃO GERAL
+        // VISÃO GERAL (DASHBOARD)
         // =====================================================
         const renderVisaoGeral = () => {
-            const { inicio, fim } = getPeriodo(state.periodo);
+            const { inicio, fim } = getPeriodo(state.periodo, state.anoSelecionado);
             const transacoesFiltradas = state.dados.transacoes.filter(t => t.data >= inicio && t.data <= fim);
             
-            const transacoesConsorcio = transacoesFiltradas.filter(t => ['consorcio', 'aporte', 'lance', 'contemplacao'].includes(t.categoria));
-            const transacoesFrota = transacoesFiltradas.filter(t => ['locacao', 'manutencao', 'seguro', 'ipva', 'documentacao', 'combustivel', 'multa', 'outros_frota'].includes(t.categoria));
+            const categoriasConsorcio = ['parcela', 'parcela_cartao', 'parcela_boleto', 'aporte', 'lance', 'contemplacao', 'comissao_consorcio', 'taxa_admin', 'outros_consorcio'];
+            const categoriasFrota = ['locacao', 'manutencao', 'seguro', 'ipva', 'documentacao', 'combustivel', 'multa', 'comissao_frota', 'outros_frota'];
+            
+            const transacoesConsorcio = transacoesFiltradas.filter(t => categoriasConsorcio.includes(t.categoria));
+            const transacoesFrota = transacoesFiltradas.filter(t => categoriasFrota.includes(t.categoria));
             
             const totalReceitasFrota = transacoesFrota.filter(t => t.tipo === 'receita').reduce((acc, t) => acc + parseFloat(t.valor || 0), 0);
             const totalDespesasFrota = transacoesFrota.filter(t => t.tipo === 'despesa').reduce((acc, t) => acc + parseFloat(t.valor || 0), 0);
+            
+            const totalReceitasConsorcio = transacoesConsorcio.filter(t => t.tipo === 'receita').reduce((acc, t) => acc + parseFloat(t.valor || 0), 0);
             const totalDespesasConsorcio = transacoesConsorcio.filter(t => t.tipo === 'despesa').reduce((acc, t) => acc + parseFloat(t.valor || 0), 0);
+            
+            const comissoesFrota = transacoesFrota.filter(t => t.categoria === 'comissao_frota');
+            const comissoesReceitaFrota = comissoesFrota.filter(t => t.tipo === 'receita').reduce((acc, t) => acc + parseFloat(t.valor || 0), 0);
+            const comissoesDespesaFrota = comissoesFrota.filter(t => t.tipo === 'despesa').reduce((acc, t) => acc + parseFloat(t.valor || 0), 0);
+            
+            const comissoesConsorcio = transacoesConsorcio.filter(t => t.categoria === 'comissao_consorcio');
+            const comissoesReceitaConsorcio = comissoesConsorcio.filter(t => t.tipo === 'receita').reduce((acc, t) => acc + parseFloat(t.valor || 0), 0);
+            const comissoesDespesaConsorcio = comissoesConsorcio.filter(t => t.tipo === 'despesa').reduce((acc, t) => acc + parseFloat(t.valor || 0), 0);
             
             const consorciosContemplados = state.dados.consorcios.filter(c => c.status === 'contemplado').length;
             const carrosLocados = state.dados.veiculos.filter(v => v.status === 'locado').length;
-            const resultadoGeral = totalReceitasFrota - totalDespesasFrota - totalDespesasConsorcio;
+            
+            const resultadoFrota = totalReceitasFrota - totalDespesasFrota;
+            const resultadoConsorcio = totalReceitasConsorcio - totalDespesasConsorcio;
+            const resultadoGeral = resultadoFrota + resultadoConsorcio;
 
             const socios = state.dados.usuarios.filter(u => u.role === 'admin' || u.role === 'socio');
 
+            // Projeções futuras (baseado nos contratos ativos e parcelas)
+            const receitaFuturaEstimada = state.dados.contratos
+                .filter(c => c.status === 'ativo')
+                .reduce((acc, c) => acc + (c.tipo_locacao === 'semanal' ? parseFloat(c.valor_locacao || 0) * 4 : parseFloat(c.valor_locacao || 0)), 0);
+            
+            const despesaFuturaConsorcio = state.dados.consorcios
+                .filter(c => c.status === 'aguardando')
+                .reduce((acc, c) => acc + parseFloat(c.valor_parcela || 0), 0);
+
             return `
                 <div class="space-y-6 fade-in">
-                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                        <h2 class="text-xl font-bold text-gray-800">Visão Geral</h2>
-                        ${FiltroPeriodo()}
+                    <!-- Header com Filtros -->
+                    <div class="bg-white rounded-xl shadow-lg p-4">
+                        <div class="flex flex-col gap-3">
+                            <div class="flex items-center justify-between">
+                                <h2 class="text-xl font-bold text-gray-800">Visão Geral</h2>
+                                <span class="text-sm text-gray-500">${getNomePeriodo(state.periodo)} ${state.anoSelecionado}</span>
+                            </div>
+                            ${FiltroPeriodo()}
+                            ${FiltroMeses()}
+                        </div>
                     </div>
 
+                    <!-- Cards Principais -->
                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                         ${CardResumo('Consórcios Ativos', state.dados.consorcios.length, 'credit-card', 'border-blue-600', `${consorciosContemplados} contemplado(s)`)}
                         ${CardResumo('Frota', `${state.dados.veiculos.length} veículo(s)`, 'car', 'border-purple-600', `${carrosLocados} locado(s)`)}
-                        ${CardResumo('Receita Frota (período)', formatarMoeda(totalReceitasFrota), 'trending-up', 'border-green-600')}
-                        ${CardResumo('Resultado Frota', formatarMoeda(totalReceitasFrota - totalDespesasFrota), 'dollar-sign', 'border-emerald-600')}
+                        ${CardResumo('Receitas (período)', formatarMoeda(totalReceitasFrota + totalReceitasConsorcio), 'trending-up', 'border-green-600')}
+                        ${CardResumo('Resultado Geral', formatarMoeda(resultadoGeral), 'dollar-sign', resultadoGeral >= 0 ? 'border-emerald-600' : 'border-red-600')}
+                    </div>
+
+                    <!-- Projeções Futuras -->
+                    <div class="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-xl shadow-lg p-6 text-white">
+                        <h3 class="font-semibold mb-4 flex items-center gap-2">
+                            <i data-lucide="trending-up" class="w-5 h-5"></i>
+                            Projeção Mensal (Próximo Mês)
+                        </h3>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div class="bg-white/10 rounded-lg p-3">
+                                <p class="text-white/70 text-xs">Receita Frota Estimada</p>
+                                <p class="text-xl font-bold">${formatarMoeda(receitaFuturaEstimada)}</p>
+                            </div>
+                            <div class="bg-white/10 rounded-lg p-3">
+                                <p class="text-white/70 text-xs">Parcelas Consórcio</p>
+                                <p class="text-xl font-bold">${formatarMoeda(despesaFuturaConsorcio)}</p>
+                            </div>
+                            <div class="bg-white/10 rounded-lg p-3">
+                                <p class="text-white/70 text-xs">Comissões Previstas</p>
+                                <p class="text-xl font-bold">${formatarMoeda(comissoesReceitaFrota + comissoesReceitaConsorcio)}</p>
+                            </div>
+                            <div class="bg-white/10 rounded-lg p-3">
+                                <p class="text-white/70 text-xs">Saldo Projetado</p>
+                                <p class="text-xl font-bold">${formatarMoeda(receitaFuturaEstimada - despesaFuturaConsorcio)}</p>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <!-- Fluxo Frota -->
                         <div class="bg-white rounded-xl shadow-lg p-6">
-                            <h3 class="font-semibold text-gray-800 mb-4">📊 Fluxo do Período</h3>
+                            <h3 class="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                                <i data-lucide="car" class="w-5 h-5 text-purple-600"></i>
+                                Fluxo Frota
+                            </h3>
                             <div class="space-y-3">
                                 <div class="flex justify-between items-center p-3 bg-green-50 rounded-lg">
-                                    <span class="text-green-700">Receitas Frota</span>
+                                    <span class="text-green-700">Receitas</span>
                                     <span class="font-bold text-green-700">${formatarMoeda(totalReceitasFrota)}</span>
                                 </div>
                                 <div class="flex justify-between items-center p-3 bg-red-50 rounded-lg">
-                                    <span class="text-red-700">Despesas Frota</span>
+                                    <span class="text-red-700">Despesas</span>
                                     <span class="font-bold text-red-700">- ${formatarMoeda(totalDespesasFrota)}</span>
                                 </div>
                                 <div class="flex justify-between items-center p-3 bg-blue-50 rounded-lg">
-                                    <span class="text-blue-700">Parcelas Consórcio</span>
-                                    <span class="font-bold text-blue-700">- ${formatarMoeda(totalDespesasConsorcio)}</span>
+                                    <span class="text-blue-700">Comissões (Receita)</span>
+                                    <span class="font-bold text-blue-700">${formatarMoeda(comissoesReceitaFrota)}</span>
                                 </div>
                                 <div class="border-t pt-3">
                                     <div class="flex justify-between items-center p-3 bg-gray-100 rounded-lg">
-                                        <span class="font-semibold text-gray-700">Resultado Geral</span>
-                                        <span class="font-bold ${resultadoGeral >= 0 ? 'text-green-700' : 'text-red-700'}">
-                                            ${formatarMoeda(resultadoGeral)}
+                                        <span class="font-semibold text-gray-700">Resultado Frota</span>
+                                        <span class="font-bold ${resultadoFrota >= 0 ? 'text-green-700' : 'text-red-700'}">
+                                            ${formatarMoeda(resultadoFrota)}
                                         </span>
                                     </div>
                                 </div>
                             </div>
                         </div>
 
+                        <!-- Fluxo Consórcio -->
                         <div class="bg-white rounded-xl shadow-lg p-6">
-                            <h3 class="font-semibold text-gray-800 mb-4">👥 Resultado por Sócio</h3>
-                            ${socios.length === 0 ? '<p class="text-gray-500">Cadastre os sócios nas configurações</p>' : `
-                                <div class="space-y-3">
-                                    ${socios.map(s => {
-                                        const resultadoSocio = resultadoGeral * (parseFloat(s.participacao || 33.33) / 100);
-                                        return `
-                                            <div class="flex justify-between items-center p-3 bg-gradient-to-r from-blue-50 to-blue-100 rounded-lg border border-blue-200">
-                                                <div>
-                                                    <span class="font-medium text-blue-800">${s.nome}</span>
-                                                    <span class="text-blue-600 text-sm ml-2">(${parseFloat(s.participacao || 33.33).toFixed(2)}%)</span>
-                                                </div>
-                                                <span class="font-bold ${resultadoSocio >= 0 ? 'text-green-600' : 'text-red-600'}">
-                                                    ${formatarMoeda(resultadoSocio)}
-                                                </span>
-                                            </div>
-                                        `;
-                                    }).join('')}
+                            <h3 class="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                                <i data-lucide="credit-card" class="w-5 h-5 text-blue-600"></i>
+                                Fluxo Consórcio
+                            </h3>
+                            <div class="space-y-3">
+                                <div class="flex justify-between items-center p-3 bg-green-50 rounded-lg">
+                                    <span class="text-green-700">Contemplações</span>
+                                    <span class="font-bold text-green-700">${formatarMoeda(totalReceitasConsorcio)}</span>
                                 </div>
-                            `}
+                                <div class="flex justify-between items-center p-3 bg-red-50 rounded-lg">
+                                    <span class="text-red-700">Parcelas/Despesas</span>
+                                    <span class="font-bold text-red-700">- ${formatarMoeda(totalDespesasConsorcio)}</span>
+                                </div>
+                                <div class="flex justify-between items-center p-3 bg-blue-50 rounded-lg">
+                                    <span class="text-blue-700">Comissões (Receita)</span>
+                                    <span class="font-bold text-blue-700">${formatarMoeda(comissoesReceitaConsorcio)}</span>
+                                </div>
+                                <div class="border-t pt-3">
+                                    <div class="flex justify-between items-center p-3 bg-gray-100 rounded-lg">
+                                        <span class="font-semibold text-gray-700">Resultado Consórcio</span>
+                                        <span class="font-bold ${resultadoConsorcio >= 0 ? 'text-green-700' : 'text-red-700'}">
+                                            ${formatarMoeda(resultadoConsorcio)}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
+                    <!-- Resultado por Sócio -->
                     <div class="bg-white rounded-xl shadow-lg p-6">
-                        <h3 class="font-semibold text-gray-800 mb-4">📋 Últimas Movimentações</h3>
+                        <h3 class="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                            <i data-lucide="users" class="w-5 h-5 text-indigo-600"></i>
+                            Resultado por Sócio
+                        </h3>
+                        ${socios.length === 0 ? '<p class="text-gray-500">Cadastre os sócios nas configurações</p>' : `
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                ${socios.map(s => {
+                                    const participacao = parseFloat(s.participacao || 33.33);
+                                    const resultadoSocio = resultadoGeral * (participacao / 100);
+                                    return `
+                                        <div class="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-200">
+                                            <div class="flex justify-between items-center mb-3">
+                                                <h4 class="font-semibold text-blue-800">${s.nome}</h4>
+                                                <span class="px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">${participacao.toFixed(2)}%</span>
+                                            </div>
+                                            <div class="space-y-2">
+                                                <div class="flex justify-between text-sm">
+                                                    <span class="text-gray-600">Frota</span>
+                                                    <span class="font-medium ${resultadoFrota >= 0 ? 'text-green-600' : 'text-red-600'}">${formatarMoeda(resultadoFrota * (participacao / 100))}</span>
+                                                </div>
+                                                <div class="flex justify-between text-sm">
+                                                    <span class="text-gray-600">Consórcio</span>
+                                                    <span class="font-medium ${resultadoConsorcio >= 0 ? 'text-green-600' : 'text-red-600'}">${formatarMoeda(resultadoConsorcio * (participacao / 100))}</span>
+                                                </div>
+                                                <div class="border-t pt-2 flex justify-between">
+                                                    <span class="font-semibold text-gray-700">Total</span>
+                                                    <span class="font-bold text-lg ${resultadoSocio >= 0 ? 'text-green-600' : 'text-red-600'}">${formatarMoeda(resultadoSocio)}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        `}
+                    </div>
+
+                    <!-- Últimas Movimentações -->
+                    <div class="bg-white rounded-xl shadow-lg p-6">
+                        <h3 class="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                            <i data-lucide="list" class="w-5 h-5 text-gray-600"></i>
+                            Últimas Movimentações
+                        </h3>
                         ${transacoesFiltradas.length === 0 ? `
-                            <p class="text-gray-500 text-center py-4">Nenhuma movimentação no período</p>
+                            <p class="text-gray-500 text-center py-4">Nenhuma movimentação no período selecionado</p>
                         ` : `
-                            <div class="space-y-2">
-                                ${transacoesFiltradas.slice(0, 8).map(t => `
-                                    <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                            <div class="space-y-2 max-h-80 overflow-y-auto scrollbar-thin">
+                                ${transacoesFiltradas.slice(0, 15).map(t => `
+                                    <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
                                         <div class="flex items-center gap-3">
-                                            <div class="w-8 h-8 rounded-full flex items-center justify-center ${t.tipo === 'receita' ? 'bg-green-100' : 'bg-red-100'}">
-                                                <i data-lucide="${t.tipo === 'receita' ? 'trending-up' : 'credit-card'}" class="w-4 h-4 ${t.tipo === 'receita' ? 'text-green-600' : 'text-red-600'}"></i>
+                                            <div class="w-10 h-10 rounded-full flex items-center justify-center ${t.tipo === 'receita' ? 'bg-green-100' : 'bg-red-100'}">
+                                                <i data-lucide="${t.tipo === 'receita' ? 'trending-up' : 'trending-down'}" class="w-5 h-5 ${t.tipo === 'receita' ? 'text-green-600' : 'text-red-600'}"></i>
                                             </div>
                                             <div>
                                                 <p class="font-medium text-gray-800 text-sm">${t.descricao}</p>
-                                                <p class="text-xs text-gray-500">${t.categoria} • ${formatarData(t.data)}</p>
+                                                <p class="text-xs text-gray-500">${t.categoria} • ${formatarDataCompleta(t.data)}</p>
                                             </div>
                                         </div>
                                         <span class="font-bold ${t.tipo === 'receita' ? 'text-green-600' : 'text-red-600'}">
@@ -643,9 +841,9 @@
                                                     <td class="px-4 py-3">
                                                         <div class="flex items-center gap-2">
                                                             <div class="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
-                                                                <div class="h-full bg-blue-500 rounded-full" style="width: ${progresso}%"></div>
+                                                                <div class="h-full bg-blue-500 rounded-full transition-all" style="width: ${progresso}%"></div>
                                                             </div>
-                                                            <span class="text-xs text-gray-500">${c.parcela_atual || 0}/${c.total_parcelas || 0}</span>
+                                                            <span class="text-xs text-gray-500 whitespace-nowrap">${c.parcela_atual || 0}/${c.total_parcelas || 0}</span>
                                                         </div>
                                                     </td>
                                                     <td class="px-4 py-3">
@@ -655,10 +853,10 @@
                                                     </td>
                                                     <td class="px-4 py-3">
                                                         <div class="flex items-center gap-1">
-                                                            <button onclick="abrirModal('consorcio', '${c.id}')" class="p-1.5 hover:bg-gray-200 rounded">
+                                                            <button onclick="abrirModal('consorcio', '${c.id}')" class="p-1.5 hover:bg-gray-200 rounded" title="Editar">
                                                                 <i data-lucide="edit-2" class="w-4 h-4 text-gray-500"></i>
                                                             </button>
-                                                            <button onclick="confirmarExclusao('consorcios', '${c.id}', '${c.administradora}')" class="p-1.5 hover:bg-red-100 rounded">
+                                                            <button onclick="confirmarExclusao('consorcios', '${c.id}', '${c.administradora}')" class="p-1.5 hover:bg-red-100 rounded" title="Excluir">
                                                                 <i data-lucide="trash-2" class="w-4 h-4 text-red-500"></i>
                                                             </button>
                                                         </div>
@@ -703,12 +901,11 @@
                         <div class="bg-white rounded-xl shadow-lg p-8 text-center">
                             <i data-lucide="car" class="w-12 h-12 mx-auto mb-3 text-gray-300"></i>
                             <p class="text-gray-500">Nenhum veículo cadastrado</p>
-                            <button onclick="abrirModal('veiculo')" class="mt-4 text-purple-600 hover:text-purple-700 font-medium">+ Adicionar primeiro veículo</button>
                         </div>
                     ` : `
                         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                             ${state.dados.veiculos.map(v => `
-                                <div class="bg-white rounded-xl shadow-lg p-4">
+                                <div class="bg-white rounded-xl shadow-lg p-4 card-hover transition-all">
                                     <div class="flex items-start justify-between mb-3">
                                         <div class="flex items-center gap-3">
                                             <div class="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
@@ -818,83 +1015,247 @@
         // FINANCEIRO FROTA
         // =====================================================
         const renderFinanceiroFrota = () => {
-            const { inicio, fim } = getPeriodo(state.periodo);
+            const { inicio, fim } = getPeriodo(state.periodo, state.anoSelecionado);
+            const categoriasFrota = ['locacao', 'manutencao', 'seguro', 'ipva', 'documentacao', 'combustivel', 'multa', 'comissao_frota', 'outros_frota'];
             const transacoesFrota = state.dados.transacoes.filter(t => 
-                ['locacao', 'manutencao', 'seguro', 'ipva', 'documentacao', 'combustivel', 'multa', 'outros_frota'].includes(t.categoria) && t.data >= inicio && t.data <= fim
+                categoriasFrota.includes(t.categoria) && t.data >= inicio && t.data <= fim
             );
             
             const totalReceitas = transacoesFrota.filter(t => t.tipo === 'receita').reduce((acc, t) => acc + parseFloat(t.valor || 0), 0);
             const totalDespesas = transacoesFrota.filter(t => t.tipo === 'despesa').reduce((acc, t) => acc + parseFloat(t.valor || 0), 0);
             const resultado = totalReceitas - totalDespesas;
+            
+            // Comissões
+            const comissoes = transacoesFrota.filter(t => t.categoria === 'comissao_frota');
+            const comissoesReceita = comissoes.filter(t => t.tipo === 'receita').reduce((acc, t) => acc + parseFloat(t.valor || 0), 0);
+            const comissoesDespesa = comissoes.filter(t => t.tipo === 'despesa').reduce((acc, t) => acc + parseFloat(t.valor || 0), 0);
 
             const socios = state.dados.usuarios.filter(u => u.role === 'admin' || u.role === 'socio');
 
             return `
                 <div class="space-y-6 fade-in">
-                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                        <h2 class="text-xl font-bold text-gray-800">Financeiro - Frota</h2>
-                        <div class="flex flex-wrap items-center gap-4">
+                    <div class="bg-white rounded-xl shadow-lg p-4">
+                        <div class="flex flex-col gap-3">
+                            <div class="flex items-center justify-between">
+                                <h2 class="text-xl font-bold text-gray-800">Financeiro - Frota</h2>
+                                <button onclick="abrirModal('transacaoFrota')" class="flex items-center gap-2 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition">
+                                    <i data-lucide="plus" class="w-4 h-4"></i> Nova Movimentação
+                                </button>
+                            </div>
                             ${FiltroPeriodo()}
-                            <button onclick="abrirModal('transacaoFrota')" class="flex items-center gap-2 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 transition">
-                                <i data-lucide="plus" class="w-4 h-4"></i> Movimentação
-                            </button>
+                            ${FiltroMeses()}
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-                        ${CardResumo('Receitas (período)', formatarMoeda(totalReceitas), 'trending-up', 'border-green-600')}
-                        ${CardResumo('Despesas (período)', formatarMoeda(totalDespesas), 'credit-card', 'border-red-600')}
-                        ${CardResumo('Resultado', formatarMoeda(resultado), 'dollar-sign', 'border-blue-600')}
-                        ${CardResumo('Movimentações', transacoesFrota.length, 'file-text', 'border-gray-600')}
+                    <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
+                        ${CardResumo('Receitas', formatarMoeda(totalReceitas), 'trending-up', 'border-green-600')}
+                        ${CardResumo('Despesas', formatarMoeda(totalDespesas), 'trending-down', 'border-red-600')}
+                        ${CardResumo('Comissões (R)', formatarMoeda(comissoesReceita), 'percent', 'border-blue-600')}
+                        ${CardResumo('Comissões (D)', formatarMoeda(comissoesDespesa), 'percent', 'border-orange-600')}
+                        ${CardResumo('Resultado', formatarMoeda(resultado), 'dollar-sign', resultado >= 0 ? 'border-emerald-600' : 'border-red-600')}
                     </div>
 
+                    <!-- Movimentações -->
                     <div class="bg-white rounded-xl shadow-lg overflow-hidden">
-                        <div class="p-4 bg-gray-50 border-b">
+                        <div class="p-4 bg-gray-50 border-b flex items-center justify-between">
                             <h3 class="font-semibold text-gray-800">Movimentações do Período</h3>
+                            <span class="text-sm text-gray-500">{transacoesFrota.length} registro(s)</span>
                         </div>
                         ${transacoesFrota.length === 0 ? `
                             <div class="p-8 text-center text-gray-500">Nenhuma movimentação no período</div>
                         ` : `
-                            <div class="divide-y max-h-96 overflow-y-auto">
-                                ${transacoesFrota.map(t => `
-                                    <div class="p-4 flex items-center justify-between">
-                                        <div class="flex items-center gap-3">
-                                            <div class="w-10 h-10 rounded-lg flex items-center justify-center ${t.tipo === 'receita' ? 'bg-green-100' : 'bg-red-100'}">
-                                                <i data-lucide="${t.tipo === 'receita' ? 'trending-up' : 'credit-card'}" class="w-5 h-5 ${t.tipo === 'receita' ? 'text-green-600' : 'text-red-600'}"></i>
+                            <div class="divide-y max-h-96 overflow-y-auto scrollbar-thin">
+                                ${transacoesFrota.map(t => {
+                                    const veiculo = state.dados.veiculos.find(v => v.id === t.veiculo_id);
+                                    return `
+                                        <div class="p-4 flex items-center justify-between hover:bg-gray-50">
+                                            <div class="flex items-center gap-3">
+                                                <div class="w-10 h-10 rounded-lg flex items-center justify-center ${t.tipo === 'receita' ? 'bg-green-100' : 'bg-red-100'}">
+                                                    <i data-lucide="${t.tipo === 'receita' ? 'trending-up' : 'trending-down'}" class="w-5 h-5 ${t.tipo === 'receita' ? 'text-green-600' : 'text-red-600'}"></i>
+                                                </div>
+                                                <div>
+                                                    <h4 class="font-medium text-gray-800">${t.descricao}</h4>
+                                                    <p class="text-sm text-gray-500">${t.categoria} ${veiculo ? '• ' + veiculo.placa : ''} • ${formatarDataCompleta(t.data)}</p>
+                                                </div>
                                             </div>
-                                            <div>
-                                                <h4 class="font-medium text-gray-800">${t.descricao}</h4>
-                                                <p class="text-sm text-gray-500">${t.categoria} • ${formatarData(t.data)}</p>
+                                            <div class="flex items-center gap-3">
+                                                <span class="font-bold ${t.tipo === 'receita' ? 'text-green-600' : 'text-red-600'}">
+                                                    ${t.tipo === 'receita' ? '+' : '-'} ${formatarMoeda(t.valor)}
+                                                </span>
+                                                <button onclick="confirmarExclusao('transacoes', '${t.id}', 'esta movimentação')" class="p-1.5 hover:bg-red-100 rounded">
+                                                    <i data-lucide="trash-2" class="w-4 h-4 text-red-500"></i>
+                                                </button>
                                             </div>
                                         </div>
-                                        <div class="flex items-center gap-3">
-                                            <span class="font-bold ${t.tipo === 'receita' ? 'text-green-600' : 'text-red-600'}">
-                                                ${t.tipo === 'receita' ? '+' : '-'} ${formatarMoeda(t.valor)}
-                                            </span>
-                                            <button onclick="confirmarExclusao('transacoes', '${t.id}', 'esta movimentação')" class="p-1.5 hover:bg-red-100 rounded">
-                                                <i data-lucide="trash-2" class="w-4 h-4 text-red-500"></i>
-                                            </button>
-                                        </div>
-                                    </div>
-                                `).join('')}
+                                    `;
+                                }).join('')}
                             </div>
                         `}
                     </div>
 
+                    <!-- Divisão Sócios -->
                     <div class="bg-white rounded-xl shadow-lg p-6">
-                        <h3 class="font-semibold text-gray-800 mb-4">💰 Resultado por Sócio</h3>
+                        <h3 class="font-semibold text-gray-800 mb-4">💰 Resultado por Sócio - Frota</h3>
                         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                             ${socios.map(s => {
-                                const resultadoSocio = resultado * (parseFloat(s.participacao || 33.33) / 100);
+                                const participacao = parseFloat(s.participacao || 33.33);
+                                const resultadoSocio = resultado * (participacao / 100);
                                 return `
                                     <div class="p-4 bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl border border-purple-200">
                                         <div class="flex justify-between items-center mb-2">
                                             <h4 class="font-semibold text-purple-800">${s.nome}</h4>
-                                            <span class="text-sm text-purple-600">${parseFloat(s.participacao || 33.33).toFixed(2)}%</span>
+                                            <span class="text-sm text-purple-600">${participacao.toFixed(2)}%</span>
                                         </div>
                                         <div class="flex justify-between">
                                             <span class="text-sm text-purple-600">Resultado</span>
                                             <span class="font-bold ${resultadoSocio >= 0 ? 'text-green-600' : 'text-red-600'}">${formatarMoeda(resultadoSocio)}</span>
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+        };
+
+        // =====================================================
+        // FINANCEIRO CONSÓRCIO (NOVO!)
+        // =====================================================
+        const renderFinanceiroConsorcio = () => {
+            const { inicio, fim } = getPeriodo(state.periodo, state.anoSelecionado);
+            const categoriasConsorcio = ['parcela', 'parcela_cartao', 'parcela_boleto', 'aporte', 'lance', 'contemplacao', 'comissao_consorcio', 'taxa_admin', 'outros_consorcio'];
+            const transacoesConsorcio = state.dados.transacoes.filter(t => 
+                categoriasConsorcio.includes(t.categoria) && t.data >= inicio && t.data <= fim
+            );
+            
+            const totalReceitas = transacoesConsorcio.filter(t => t.tipo === 'receita').reduce((acc, t) => acc + parseFloat(t.valor || 0), 0);
+            const totalDespesas = transacoesConsorcio.filter(t => t.tipo === 'despesa').reduce((acc, t) => acc + parseFloat(t.valor || 0), 0);
+            const resultado = totalReceitas - totalDespesas;
+            
+            // Por categoria
+            const parcelas = transacoesConsorcio.filter(t => ['parcela', 'parcela_cartao', 'parcela_boleto'].includes(t.categoria)).reduce((acc, t) => acc + parseFloat(t.valor || 0), 0);
+            const lances = transacoesConsorcio.filter(t => t.categoria === 'lance').reduce((acc, t) => acc + parseFloat(t.valor || 0), 0);
+            const contemplacao = transacoesConsorcio.filter(t => t.categoria === 'contemplacao').reduce((acc, t) => acc + parseFloat(t.valor || 0), 0);
+            const comissoes = transacoesConsorcio.filter(t => t.categoria === 'comissao_consorcio');
+            const comissoesReceita = comissoes.filter(t => t.tipo === 'receita').reduce((acc, t) => acc + parseFloat(t.valor || 0), 0);
+
+            // Total investido geral
+            const totalInvestido = state.dados.consorcios.reduce((acc, c) => acc + ((c.parcela_atual || 0) * parseFloat(c.valor_parcela || 0)), 0);
+
+            const socios = state.dados.usuarios.filter(u => u.role === 'admin' || u.role === 'socio');
+
+            return `
+                <div class="space-y-6 fade-in">
+                    <div class="bg-white rounded-xl shadow-lg p-4">
+                        <div class="flex flex-col gap-3">
+                            <div class="flex items-center justify-between">
+                                <h2 class="text-xl font-bold text-gray-800">Financeiro - Consórcio</h2>
+                                <button onclick="abrirModal('transacaoConsorcio')" class="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
+                                    <i data-lucide="plus" class="w-4 h-4"></i> Nova Movimentação
+                                </button>
+                            </div>
+                            ${FiltroPeriodo()}
+                            ${FiltroMeses()}
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-5 gap-4">
+                        ${CardResumo('Total Investido', formatarMoeda(totalInvestido), 'piggy-bank', 'border-indigo-600')}
+                        ${CardResumo('Parcelas (período)', formatarMoeda(parcelas), 'credit-card', 'border-red-600')}
+                        ${CardResumo('Lances', formatarMoeda(lances), 'zap', 'border-amber-600')}
+                        ${CardResumo('Contemplações', formatarMoeda(contemplacao), 'trophy', 'border-green-600')}
+                        ${CardResumo('Comissões', formatarMoeda(comissoesReceita), 'percent', 'border-blue-600')}
+                    </div>
+
+                    <!-- Resumo por Tipo de Pagamento -->
+                    <div class="bg-white rounded-xl shadow-lg p-6">
+                        <h3 class="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                            <i data-lucide="pie-chart" class="w-5 h-5 text-blue-600"></i>
+                            Resumo por Forma de Pagamento
+                        </h3>
+                        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                            <div class="p-4 bg-gray-50 rounded-lg">
+                                <p class="text-sm text-gray-500">Parcelas (Boleto)</p>
+                                <p class="text-xl font-bold text-gray-800">${formatarMoeda(transacoesConsorcio.filter(t => t.categoria === 'parcela_boleto').reduce((acc, t) => acc + parseFloat(t.valor || 0), 0))}</p>
+                            </div>
+                            <div class="p-4 bg-gray-50 rounded-lg">
+                                <p class="text-sm text-gray-500">Parcelas (Cartão)</p>
+                                <p class="text-xl font-bold text-gray-800">${formatarMoeda(transacoesConsorcio.filter(t => t.categoria === 'parcela_cartao').reduce((acc, t) => acc + parseFloat(t.valor || 0), 0))}</p>
+                            </div>
+                            <div class="p-4 bg-gray-50 rounded-lg">
+                                <p class="text-sm text-gray-500">Parcelas (Outros)</p>
+                                <p class="text-xl font-bold text-gray-800">${formatarMoeda(transacoesConsorcio.filter(t => t.categoria === 'parcela').reduce((acc, t) => acc + parseFloat(t.valor || 0), 0))}</p>
+                            </div>
+                            <div class="p-4 bg-blue-50 rounded-lg">
+                                <p class="text-sm text-blue-600">Total Parcelas</p>
+                                <p class="text-xl font-bold text-blue-800">${formatarMoeda(parcelas)}</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Movimentações -->
+                    <div class="bg-white rounded-xl shadow-lg overflow-hidden">
+                        <div class="p-4 bg-gray-50 border-b flex items-center justify-between">
+                            <h3 class="font-semibold text-gray-800">Movimentações do Período</h3>
+                            <span class="text-sm text-gray-500">${transacoesConsorcio.length} registro(s)</span>
+                        </div>
+                        ${transacoesConsorcio.length === 0 ? `
+                            <div class="p-8 text-center text-gray-500">Nenhuma movimentação no período</div>
+                        ` : `
+                            <div class="divide-y max-h-96 overflow-y-auto scrollbar-thin">
+                                ${transacoesConsorcio.map(t => {
+                                    const consorcio = state.dados.consorcios.find(c => c.id === t.consorcio_id);
+                                    const categoriaLabel = CATEGORIAS_CONSORCIO.find(c => c.value === t.categoria)?.label || t.categoria;
+                                    return `
+                                        <div class="p-4 flex items-center justify-between hover:bg-gray-50">
+                                            <div class="flex items-center gap-3">
+                                                <div class="w-10 h-10 rounded-lg flex items-center justify-center ${t.tipo === 'receita' ? 'bg-green-100' : 'bg-red-100'}">
+                                                    <i data-lucide="${t.tipo === 'receita' ? 'trending-up' : 'trending-down'}" class="w-5 h-5 ${t.tipo === 'receita' ? 'text-green-600' : 'text-red-600'}"></i>
+                                                </div>
+                                                <div>
+                                                    <h4 class="font-medium text-gray-800">${t.descricao}</h4>
+                                                    <p class="text-sm text-gray-500">${categoriaLabel} ${consorcio ? '• ' + consorcio.administradora : ''} • ${formatarDataCompleta(t.data)}</p>
+                                                </div>
+                                            </div>
+                                            <div class="flex items-center gap-3">
+                                                <span class="font-bold ${t.tipo === 'receita' ? 'text-green-600' : 'text-red-600'}">
+                                                    ${t.tipo === 'receita' ? '+' : '-'} ${formatarMoeda(t.valor)}
+                                                </span>
+                                                <button onclick="confirmarExclusao('transacoes', '${t.id}', 'esta movimentação')" class="p-1.5 hover:bg-red-100 rounded">
+                                                    <i data-lucide="trash-2" class="w-4 h-4 text-red-500"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        `}
+                    </div>
+
+                    <!-- Divisão Sócios -->
+                    <div class="bg-white rounded-xl shadow-lg p-6">
+                        <h3 class="font-semibold text-gray-800 mb-4">💰 Investimento por Sócio</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            ${socios.map(s => {
+                                const participacao = parseFloat(s.participacao || 33.33);
+                                const investimentoSocio = totalInvestido * (participacao / 100);
+                                const resultadoSocio = resultado * (participacao / 100);
+                                return `
+                                    <div class="p-4 bg-gradient-to-br from-blue-50 to-indigo-100 rounded-xl border border-blue-200">
+                                        <div class="flex justify-between items-center mb-3">
+                                            <h4 class="font-semibold text-blue-800">${s.nome}</h4>
+                                            <span class="text-sm text-blue-600">${participacao.toFixed(2)}%</span>
+                                        </div>
+                                        <div class="space-y-2">
+                                            <div class="flex justify-between text-sm">
+                                                <span class="text-gray-600">Investido</span>
+                                                <span class="font-medium text-blue-700">${formatarMoeda(investimentoSocio)}</span>
+                                            </div>
+                                            <div class="flex justify-between text-sm">
+                                                <span class="text-gray-600">Resultado período</span>
+                                                <span class="font-medium ${resultadoSocio >= 0 ? 'text-green-600' : 'text-red-600'}">${formatarMoeda(resultadoSocio)}</span>
+                                            </div>
                                         </div>
                                     </div>
                                 `;
@@ -963,7 +1324,7 @@
                             <input type="hidden" id="item_id" value="${d.id || ''}">
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Administradora</label>
-                                <input type="text" id="administradora" value="${d.administradora || ''}" required class="w-full p-3 border rounded-lg">
+                                <input type="text" id="administradora" value="${d.administradora || ''}" required class="w-full p-3 border rounded-lg focus:ring-2 focus:ring-blue-500">
                             </div>
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
@@ -1063,7 +1424,7 @@
                                 </div>
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-1">Ano</label>
-                                    <input type="number" id="ano" value="${d.ano || new Date().getFullYear()}" class="w-full p-3 border rounded-lg">
+                                    <input type="number" id="ano" value="${d.ano || new Date().getFullYear()}" min="2000" max="2030" class="w-full p-3 border rounded-lg">
                                 </div>
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-1">Cor</label>
@@ -1151,7 +1512,7 @@
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Score</label>
                                 <select id="score" class="w-full p-3 border rounded-lg">
-                                    ${[1,2,3,4,5].map(n => `<option value="${n}" ${d.score == n ? 'selected' : ''}>${n} - ${'⭐'.repeat(n)}</option>`).join('')}
+                                    ${[1,2,3,4,5].map(n => `<option value="${n}" ${(d.score || 5) == n ? 'selected' : ''}>${n} - ${'⭐'.repeat(n)}</option>`).join('')}
                                 </select>
                             </div>
                         </form>
@@ -1195,39 +1556,32 @@
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
                                     <select id="tipo" class="w-full p-3 border rounded-lg">
-                                        <option value="receita">Receita</option>
-                                        <option value="despesa">Despesa</option>
+                                        <option value="receita">Receita (Entrada)</option>
+                                        <option value="despesa">Despesa (Saída)</option>
                                     </select>
                                 </div>
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-1">Categoria</label>
                                     <select id="categoria" class="w-full p-3 border rounded-lg">
-                                        <option value="locacao">Locação</option>
-                                        <option value="manutencao">Manutenção</option>
-                                        <option value="seguro">Seguro</option>
-                                        <option value="ipva">IPVA</option>
-                                        <option value="documentacao">Documentação</option>
-                                        <option value="combustivel">Combustível</option>
-                                        <option value="multa">Multa</option>
-                                        <option value="outros_frota">Outros</option>
+                                        ${CATEGORIAS_FROTA.map(c => `<option value="${c.value}">${c.label}</option>`).join('')}
                                     </select>
                                 </div>
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Veículo (opcional)</label>
                                 <select id="veiculo_id" class="w-full p-3 border rounded-lg">
-                                    <option value="">Nenhum</option>
+                                    <option value="">Nenhum / Geral</option>
                                     ${state.dados.veiculos.map(v => `<option value="${v.id}">${v.marca} ${v.modelo} - ${v.placa}</option>`).join('')}
                                 </select>
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Descrição</label>
-                                <input type="text" id="descricao" required class="w-full p-3 border rounded-lg" placeholder="Locação semanal">
+                                <input type="text" id="descricao" required class="w-full p-3 border rounded-lg" placeholder="Ex: Locação semanal">
                             </div>
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-1">Valor</label>
-                                    <input type="number" id="valor" required class="w-full p-3 border rounded-lg">
+                                    <input type="number" step="0.01" id="valor" required class="w-full p-3 border rounded-lg" placeholder="0,00">
                                 </div>
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-1">Data</label>
@@ -1274,35 +1628,32 @@
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
                                     <select id="tipo" class="w-full p-3 border rounded-lg">
-                                        <option value="despesa">Despesa</option>
-                                        <option value="receita">Receita</option>
+                                        <option value="despesa">Despesa (Saída)</option>
+                                        <option value="receita">Receita (Entrada)</option>
                                     </select>
                                 </div>
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-1">Categoria</label>
                                     <select id="categoria" class="w-full p-3 border rounded-lg">
-                                        <option value="consorcio">Parcela</option>
-                                        <option value="aporte">Aporte Extra</option>
-                                        <option value="lance">Lance</option>
-                                        <option value="contemplacao">Contemplação</option>
+                                        ${CATEGORIAS_CONSORCIO.map(c => `<option value="${c.value}">${c.label}</option>`).join('')}
                                     </select>
                                 </div>
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Consórcio</label>
                                 <select id="consorcio_id" class="w-full p-3 border rounded-lg">
-                                    <option value="">Selecione</option>
+                                    <option value="">Selecione (opcional)</option>
                                     ${state.dados.consorcios.map(c => `<option value="${c.id}">${c.administradora} - ${formatarMoeda(c.valor_carta)}</option>`).join('')}
                                 </select>
                             </div>
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-1">Descrição</label>
-                                <input type="text" id="descricao" required class="w-full p-3 border rounded-lg" placeholder="Parcela 25/80">
+                                <input type="text" id="descricao" required class="w-full p-3 border rounded-lg" placeholder="Ex: Parcela 25/80">
                             </div>
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-1">Valor</label>
-                                    <input type="number" id="valor" required class="w-full p-3 border rounded-lg">
+                                    <input type="number" step="0.01" id="valor" required class="w-full p-3 border rounded-lg" placeholder="0,00">
                                 </div>
                                 <div>
                                     <label class="block text-sm font-medium text-gray-700 mb-1">Data</label>
@@ -1336,7 +1687,7 @@
             }
         };
 
-        // Confirmação
+        // Confirmação de exclusão
         const confirmarExclusao = (tabela, id, nome) => {
             state.confirmacao = { tabela, id, nome };
             render();
@@ -1375,7 +1726,7 @@
         };
 
         // =====================================================
-        // DASHBOARD
+        // DASHBOARD PRINCIPAL
         // =====================================================
         const renderDashboard = () => {
             const abas = [
@@ -1384,6 +1735,7 @@
                 { id: 'frota', label: 'Frota', icone: 'car' },
                 { id: 'motoristas', label: 'Motoristas', icone: 'user-check' },
                 { id: 'finFrota', label: 'Fin. Frota', icone: 'trending-up' },
+                { id: 'finConsorcio', label: 'Fin. Consórcio', icone: 'piggy-bank' },
             ];
 
             const renderAba = () => {
@@ -1393,6 +1745,7 @@
                     case 'frota': return renderFrota();
                     case 'motoristas': return renderMotoristas();
                     case 'finFrota': return renderFinanceiroFrota();
+                    case 'finConsorcio': return renderFinanceiroConsorcio();
                     default: return renderVisaoGeral();
                 }
             };
@@ -1440,6 +1793,14 @@
                                         </button>
                                     `).join('')}
                                 </div>
+                                
+                                <!-- Versão -->
+                                <div class="absolute bottom-4 left-4 right-4">
+                                    <div class="bg-gray-50 rounded-lg p-3 text-center">
+                                        <p class="text-xs text-gray-400">Versão 2.0</p>
+                                        <p class="text-xs text-gray-500">Atualizado em Fev/2026</p>
+                                    </div>
+                                </div>
                             </nav>
                         </aside>
 
@@ -1485,7 +1846,6 @@
         // INICIALIZAÇÃO
         // =====================================================
         const init = async () => {
-            // Verificar sessão
             const { data: { session } } = await db.auth.getSession();
             
             if (session?.user) {
@@ -1493,13 +1853,14 @@
                 const loaded = await carregarDadosUsuario(session.user.id);
                 if (loaded) {
                     await carregarTodosDados();
+                } else {
+                    alert('Erro: Empresa não carregada. Faça logout e login novamente.');
                 }
             }
 
             state.loading = false;
             render();
 
-            // Listener de auth
             db.auth.onAuthStateChange(async (event, session) => {
                 if (event === 'SIGNED_IN' && session?.user) {
                     state.user = session.user;
